@@ -114,7 +114,7 @@ async def list_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     roles = db.get_all_roles(chat_id)
     if not roles:
-        await update.message.reply_text("Список пуст.")
+        await update.message.reply_text("Список пуст!")
         return
     
     text = "*Список ролей:*\n\n"
