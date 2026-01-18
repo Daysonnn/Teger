@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.py[cod]
+*.db
+roles_bot.db
+.venv/
+venv/
+env/
+.idea/
+.vscode/
+*.log
