@@ -140,3 +140,34 @@ async def dynamic_role_call(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if members:
         mentions = " ".join(members)
         await update.message.reply_text(f"📢 *Призыв {esc(command_text)}!*\n{mentions}", parse_mode=ParseMode.MARKDOWN)
+
+async def add_to_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_group(update): return 
+    if not await check_admin(update):
+        await update.message.reply_text("Только для админов!")
+        return
+    if not update.message.reply_to_message:
+        await update.message.reply_text(
+            "📌 Чтобы добавить человека, нужно **ответить** на его сообщение командой:\n`/add <роль>`", 
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    if not context.args:
+        await update.message.reply_text("Пиши: `/add <роль>`", parse_mode=ParseMode.MARKDOWN)
+        return
+    
+    role_name = context.args[0]
+    target_user = update.message.reply_to_message.from_user
+    chat_id = update.effective_chat.id
+    
+    clean_username = f"@{target_user.username}" if target_user.username else target_user.first_name
+    
+    result = db.join_role(chat_id, role_name, target_user.id, clean_username)
+    
+    if result == "success":
+        await update.message.reply_text(f"Пользователь *{esc(clean_username)}* добавлен в роль *{esc(role_name)}*!", parse_mode=ParseMode.MARKDOWN)
+    elif result == "already_in":
+        await update.message.reply_text(f"Пользователь *{esc(clean_username)}* уже состоит в этой роли.", parse_mode=ParseMode.MARKDOWN)
+    elif result == "not_found":
+        await update.message.reply_text(f"Роли *{esc(role_name)}* не существует. Сначала создай её через `/create`.", parse_mode=ParseMode.MARKDOWN)

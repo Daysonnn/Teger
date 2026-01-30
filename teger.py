@@ -29,6 +29,7 @@ def main():
     
     app.add_handler(CommandHandler("create", handlers.create_role))
     app.add_handler(CommandHandler("delete", handlers.delete_role))
+    app.add_handler(CommandHandler("add", handlers.add_to_role))
     
     app.add_handler(CommandHandler("join", handlers.join_role))
     app.add_handler(CommandHandler("leave", handlers.leave_role))
