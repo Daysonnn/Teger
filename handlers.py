@@ -32,7 +32,8 @@ async def start_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`/<роль>` — Позвать всех\n\n"
         "*Админка (только в группах):*\n"
         "`/create <роль>`\n"
-        "`/delete <роль>`"
+        "`/delete <роль>`\n"
+        "`/add <роль>` — добавить пользователя (ответом на его сообщение)"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
