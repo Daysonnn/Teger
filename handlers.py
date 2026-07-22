@@ -256,15 +256,21 @@ async def inline_query_handler(query: InlineQuery):
 
         all_roles = await db.get_global_roles_with_details()
         results = []
+        seen_ids = set()
+
+        def add_result(article: InlineQueryResultArticle):
+            if article.id not in seen_ids:
+                seen_ids.add(article.id)
+                results.append(article)
 
         # 1. Опция призыва всех участников /all
         all_members = await db.get_inline_role_members("all")
-        if all_members and (not query_text or "all".startswith(query_text) or "все".startswith(query_text)):
+        if all_members and (not query_text or "all".startswith(query_text) or query_text in "all" or "все".startswith(query_text)):
             all_mentions = [format_user_mention(uid, uname) for uid, uname in all_members]
             all_str = "\n".join(f"👤 {m}" for m in all_mentions)
-            results.append(
+            add_result(
                 InlineQueryResultArticle(
-                    id="role_all",
+                    id="role_special_all",
                     title=f"👥 all — Позвать ВСЕХ участников ({len(all_members)} чел.)",
                     description="Призыв всех участников чата",
                     thumbnail_url=default_thumb,
@@ -280,7 +286,7 @@ async def inline_query_handler(query: InlineQuery):
             role_name = r_info["name"]
             emoji = r_info["emoji"]
             
-            # Фильтрация по совпадению ввода (по началу слова или подстроке)
+            # Фильтрация по совпадению ввода
             if query_text and (query_text not in role_name.lower()):
                 continue
 
@@ -300,9 +306,9 @@ async def inline_query_handler(query: InlineQuery):
                 )
                 desc = f"Отправить призыв /{role_name}"
 
-            results.append(
+            add_result(
                 InlineQueryResultArticle(
-                    id=f"role_{role_name}",
+                    id=f"role_db_{role_name}",
                     title=f"{emoji} {role_name} ({len(members)} чел.)",
                     description=desc,
                     thumbnail_url=default_thumb,
@@ -314,7 +320,7 @@ async def inline_query_handler(query: InlineQuery):
             )
 
         # 3. Резервный вариант если роль введена вручную и её ещё нет в списке
-        if query_text and not any(r.id == f"role_{query_text}" for r in results):
+        if query_text and not any(r.id == f"role_db_{query_text}" or r.id == f"role_special_{query_text}" for r in results):
             members = await db.get_inline_role_members(query_text)
             if members:
                 mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
@@ -331,9 +337,9 @@ async def inline_query_handler(query: InlineQuery):
                 )
                 desc = f"Отправить призыв /{query_text}"
 
-            results.append(
+            add_result(
                 InlineQueryResultArticle(
-                    id=f"role_{query_text}",
+                    id=f"role_custom_{query_text}",
                     title=f"📢 Позвать роль: {query_text}",
                     description=desc,
                     thumbnail_url=default_thumb,
@@ -345,7 +351,7 @@ async def inline_query_handler(query: InlineQuery):
             )
 
         if not results:
-            results.append(
+            add_result(
                 InlineQueryResultArticle(
                     id="role_prompt_empty",
                     title="📢 Инлайн-призыв роли",
@@ -374,6 +380,7 @@ async def inline_query_handler(query: InlineQuery):
             )
         ]
         await query.answer(fallback, cache_time=0, is_personal=True)
+
 
 
 
