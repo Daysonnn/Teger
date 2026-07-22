@@ -26,6 +26,15 @@ async def init_db():
                 UNIQUE(role_id, user_id)
             )
         ''')
+
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS chat_users (
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                username TEXT,
+                PRIMARY KEY(chat_id, user_id)
+            )
+        ''')
         await conn.commit()
     _db_initialized = True
 
@@ -37,6 +46,34 @@ async def get_db():
     async with aiosqlite.connect(DB_NAME) as conn:
         await conn.execute("PRAGMA foreign_keys = ON;")
         yield conn
+
+async def record_chat_user(chat_id: int, user_id: int, username: str):
+    """Запоминает активного участника чата для команды /all."""
+    if not chat_id or not user_id:
+        return
+    try:
+        async with get_db() as conn:
+            await conn.execute('''
+                INSERT INTO chat_users (chat_id, user_id, username)
+                VALUES (?, ?, ?)
+                ON CONFLICT(chat_id, user_id) DO UPDATE SET username=excluded.username
+            ''', (chat_id, user_id, username))
+            await conn.commit()
+    except Exception:
+        pass
+
+async def get_all_chat_users(chat_id: int) -> list[tuple[int, str]]:
+    """Возвращает всех известных участников чата (из базы чата и ролей)."""
+    async with get_db() as conn:
+        cursor = await conn.execute('''
+            SELECT user_id, username FROM (
+                SELECT user_id, username FROM chat_users WHERE chat_id = ?
+                UNION
+                SELECT m.user_id, m.username FROM members m JOIN roles r ON m.role_id = r.id WHERE r.chat_id = ?
+            )
+        ''', (chat_id, chat_id))
+        rows = await cursor.fetchall()
+        return rows
 
 async def create_role(chat_id: int, role_name: str) -> bool:
     try:
@@ -54,6 +91,7 @@ async def delete_role(chat_id: int, role_name: str) -> bool:
         return cursor.rowcount > 0
 
 async def join_role(chat_id: int, role_name: str, user_id: int, username: str) -> str:
+    await record_chat_user(chat_id, user_id, username)
     async with get_db() as conn:
         cursor = await conn.execute('SELECT id FROM roles WHERE chat_id = ? AND name = ?', (chat_id, role_name))
         role = await cursor.fetchone()
@@ -99,5 +137,3 @@ async def get_role_members(chat_id: int, role_name: str) -> list[tuple[int, str]
         ''', (chat_id, role_name))
         rows = await cursor.fetchall()
         return rows
-
-

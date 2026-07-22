@@ -399,15 +399,46 @@ async def add_to_role(message: Message, command: CommandObject, bot: Bot):
     elif result == "not_found":
         await message.reply(f"❌ Роли <b>{html.escape(role_name)}</b> не найдено.", parse_mode=ParseMode.HTML)
 
+@router.message(Command("all"))
+@router.message(Command("everyone"))
+async def call_all_members(message: Message):
+    if not await is_group(message): return
+    chat_id = message.chat.id
+    
+    if message.from_user:
+        user = message.from_user
+        uname = f"@{user.username}" if user.username else user.first_name
+        await db.record_chat_user(chat_id, user.id, uname)
+    
+    members = await db.get_all_chat_users(chat_id)
+    if not members:
+        await message.reply("👥 В группе пока нет зарегистрированных участников.")
+        return
+
+    mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
+    mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
+    keyboard = get_main_menu_keyboard(chat_id)
+
+    text = (
+        f"📢 <b>Призыв ВСЕХ участников чата!</b> ({len(members)} чел.)\n\n"
+        f"<blockquote expandable>{mentions_str}</blockquote>"
+    )
+    await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
 @router.message(F.text.startswith("/"))
 async def dynamic_role_call(message: Message):
     if message.chat.type == ChatType.PRIVATE:
         return
 
+    if message.from_user:
+        user = message.from_user
+        uname = f"@{user.username}" if user.username else user.first_name
+        await db.record_chat_user(message.chat.id, user.id, uname)
+
     raw_cmd = message.text[1:].split()[0]
     command_text = raw_cmd.split('@')[0]
     
-    if command_text in ["start", "help", "menu", "create", "delete", "join", "leave", "list", "add"]:
+    if command_text in ["start", "help", "menu", "create", "delete", "join", "leave", "list", "add", "all", "everyone"]:
         return
 
     chat_id = message.chat.id
@@ -423,3 +454,4 @@ async def dynamic_role_call(message: Message):
             f"<blockquote expandable>{mentions_str}</blockquote>"
         )
         await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
