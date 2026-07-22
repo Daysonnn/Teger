@@ -33,7 +33,7 @@
             padding-bottom: 90px;
         }
 
-        /* Шапка с нативным переключением закладок */
+        /* Шапка */
         .app-header {
             margin-bottom: 16px;
         }
@@ -105,7 +105,7 @@
             color: var(--hint-color);
         }
 
-        /* Карточки ролей */
+        /* Табы и карточки ролей */
         .tab-content {
             display: none;
         }
@@ -203,7 +203,7 @@
             font-style: italic;
         }
 
-        /* Действия */
+        /* Кнопки */
         .role-actions {
             display: flex;
             gap: 8px;
@@ -289,6 +289,7 @@
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 12px;
+            margin-bottom: 16px;
         }
 
         .stat-card {
@@ -313,6 +314,136 @@
             text-transform: uppercase;
         }
 
+        /* Состав чата (Админка ростера) */
+        .roster-card {
+            background: var(--secondary-bg-color);
+            border-radius: 14px;
+            padding: 16px;
+            border: 1px solid var(--border-color);
+        }
+
+        .roster-card h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--hint-color);
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            margin-bottom: 12px;
+        }
+
+        .user-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .user-row:last-child {
+            border-bottom: none;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .user-roles {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+
+        .role-tag {
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 6px;
+            color: var(--hint-color);
+        }
+
+        /* Модальное окно выбора участников */
+        .modal-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(4px);
+            z-index: 200;
+            display: none;
+            align-items: flex-end;
+        }
+
+        .modal-backdrop.open {
+            display: flex;
+        }
+
+        .modal-sheet {
+            background: var(--bg-color);
+            border-top-left-radius: 20px;
+            border-top-right-radius: 20px;
+            width: 100%;
+            max-height: 85vh;
+            padding: 20px 16px 30px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.15);
+            animation: slideUp 0.25s ease-out;
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(100%); }
+            to { transform: translateY(0); }
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .close-btn {
+            background: var(--secondary-bg-color);
+            border: none;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--hint-color);
+            cursor: pointer;
+        }
+
+        .modal-scroll {
+            overflow-y: auto;
+            max-height: 55vh;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .member-select-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--secondary-bg-color);
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+        }
+
         .status-toast {
             position: fixed;
             bottom: 20px;
@@ -325,7 +456,7 @@
             font-size: 13px;
             font-weight: 600;
             transition: transform 0.25s ease;
-            z-index: 100;
+            z-index: 300;
         }
 
         .status-toast.visible {
@@ -351,9 +482,8 @@
     <div class="tabs-nav">
         <button class="tab-btn active" onclick="switchTab('roles', this)">🛡️ Роли</button>
         <button class="tab-btn" onclick="switchTab('create', this)">➕ Создать</button>
-        <button class="tab-btn" onclick="switchTab('stats', this)">📊 Статистика</button>
+        <button class="tab-btn" onclick="switchTab('stats', this)">📊 Участники</button>
     </div>
-
 
     <!-- ТАБ 1: Список ролей -->
     <div id="tab-roles" class="tab-content active">
@@ -377,7 +507,7 @@
         </div>
     </div>
 
-    <!-- ТАБ 3: Статистика -->
+    <!-- ТАБ 3: Список всех участников группы -->
     <div id="tab-stats" class="tab-content">
         <div class="stats-grid">
             <div class="stat-card">
@@ -387,6 +517,37 @@
             <div class="stat-card">
                 <div class="stat-label">Участников</div>
                 <div id="stat-members-count" class="stat-number">0</div>
+            </div>
+        </div>
+
+        <div class="roster-card">
+            <h3>Участники группы и их роли</h3>
+            <div id="roster-list">
+                <div class="loader">Загрузка состава...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- МОДАЛЬНОЕ ОКНО Выбора участников для роли -->
+    <div id="modal-backdrop" class="modal-backdrop" onclick="closeMemberModal(event)">
+        <div class="modal-sheet" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div id="modal-title" class="modal-title">Добавление участников</div>
+                <button class="close-btn" onclick="closeMemberModal()">✕</button>
+            </div>
+            
+            <div class="form-row">
+                <input type="text" id="manual-user-input" class="create-input" placeholder="Добавить @username вручную">
+                <button class="btn btn-join" style="flex: initial;" onclick="addManualUser()">+ Добавить</button>
+            </div>
+
+            <div class="search-box" style="margin-bottom: 0;">
+                <span class="search-icon">🔍</span>
+                <input type="text" id="modal-search" class="search-input" placeholder="Поиск в списке чата..." oninput="filterModalMembers()">
+            </div>
+
+            <div id="modal-members-list" class="modal-scroll">
+                <div class="loader">Загрузка участников...</div>
             </div>
         </div>
     </div>
@@ -402,6 +563,8 @@
         const urlParams = new URLSearchParams(window.location.search);
         let chatId = urlParams.get('chat_id') || tg.initDataUnsafe.start_param;
         let allRolesCache = [];
+        let chatMembersCache = [];
+        let activeModalRole = null;
 
         document.getElementById('chat-info').textContent = chatId 
             ? `Группа ID: ${chatId}` 
@@ -429,8 +592,11 @@
             if (targetBtn) targetBtn.classList.add('active');
             const targetContent = document.getElementById(`tab-${tabName}`);
             if (targetContent) targetContent.classList.add('active');
-        }
 
+            if (tabName === 'stats') {
+                fetchChatMembers();
+            }
+        }
 
         async function fetchRoles() {
             if (!chatId) {
@@ -460,6 +626,39 @@
                         Ошибка подключения к серверу
                     </div>`;
             }
+        }
+
+        async function fetchChatMembers() {
+            if (!chatId) return;
+            try {
+                const res = await fetch(`/api/chat_members?chat_id=${chatId}`);
+                const data = await res.json();
+                chatMembersCache = data.members || [];
+                renderRoster(chatMembersCache);
+            } catch (e) {
+                console.error("Ошибка загрузки участников:", e);
+            }
+        }
+
+        function renderRoster(members) {
+            const container = document.getElementById('roster-list');
+            if (members.length === 0) {
+                container.innerHTML = `<div class="loader">Участники не найдены</div>`;
+                return;
+            }
+
+            container.innerHTML = members.map(m => {
+                const rolesBadges = m.roles.length > 0
+                    ? m.roles.map(r => `<span class="role-tag">🛡️ ${escapeHtml(r)}</span>`).join('')
+                    : `<span class="role-tag">без ролей</span>`;
+
+                return `
+                    <div class="user-row">
+                        <div class="user-info">👤 ${escapeHtml(m.username)}</div>
+                        <div class="user-roles">${rolesBadges}</div>
+                    </div>
+                `;
+            }).join('');
         }
 
         function filterRoles() {
@@ -505,7 +704,7 @@
                                 ? `<button class="btn btn-leave" onclick="leaveRole('${role.name}')">Выйти</button>`
                                 : `<button class="btn btn-join" onclick="joinRole('${role.name}')">Вступить</button>`
                             }
-                            <button class="btn btn-share" onclick="addMemberByUsername('${role.name}')" title="Добавить @username">👤+</button>
+                            <button class="btn btn-share" onclick="openMemberModal('${role.name}')" title="Управление участниками">👤+</button>
                             <button class="btn btn-share" onclick="shareRoleLink('${role.name}')" title="Ссылка">🔗</button>
                             <button class="btn btn-delete" onclick="deleteRole('${role.name}')" title="Удалить">🗑</button>
                         </div>
@@ -514,6 +713,88 @@
             }).join('');
         }
 
+        async function openMemberModal(roleName) {
+            activeModalRole = roleName;
+            triggerHaptic('medium');
+            document.getElementById('modal-title').textContent = `Участники: ${roleName}`;
+            document.getElementById('manual-user-input').value = '';
+            document.getElementById('modal-search').value = '';
+            document.getElementById('modal-backdrop').classList.add('open');
+            
+            await fetchChatMembers();
+            renderModalMembers(chatMembersCache);
+        }
+
+        function closeMemberModal() {
+            document.getElementById('modal-backdrop').classList.remove('open');
+            activeModalRole = null;
+        }
+
+        function filterModalMembers() {
+            const query = document.getElementById('modal-search').value.toLowerCase().trim();
+            const filtered = chatMembersCache.filter(m => m.username.toLowerCase().includes(query));
+            renderModalMembers(filtered);
+        }
+
+        function renderModalMembers(members) {
+            const container = document.getElementById('modal-members-list');
+            const targetRole = allRolesCache.find(r => r.name === activeModalRole);
+            const roleMemberIds = targetRole ? targetRole.members.map(m => m.user_id) : [];
+
+            if (members.length === 0) {
+                container.innerHTML = `<div class="loader">Список участников пуст</div>`;
+                return;
+            }
+
+            container.innerHTML = members.map(m => {
+                const inRole = roleMemberIds.includes(m.user_id);
+                return `
+                    <div class="member-select-row">
+                        <div class="user-info">👤 ${escapeHtml(m.username)}</div>
+                        ${inRole 
+                            ? `<button class="btn btn-leave" style="flex: initial;" onclick="toggleRoleUser('${activeModalRole}', ${m.user_id}, '${escapeHtml(m.username)}', false)">✅ В роли</button>`
+                            : `<button class="btn btn-join" style="flex: initial;" onclick="toggleRoleUser('${activeModalRole}', ${m.user_id}, '${escapeHtml(m.username)}', true)">+ Добавить</button>`
+                        }
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function toggleRoleUser(roleName, userId, username, shouldAdd) {
+            triggerHaptic('light');
+            try {
+                const endpoint = shouldAdd ? '/api/join' : '/api/leave';
+                const res = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: parseInt(chatId),
+                        role_name: roleName,
+                        user_id: userId,
+                        username: username
+                    })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    showToast(shouldAdd ? `${username} добавлен` : `${username} удален`);
+                    await fetchRoles();
+                    await fetchChatMembers();
+                    renderModalMembers(chatMembersCache);
+                }
+            } catch (e) {
+                showToast('Ошибка операции');
+            }
+        }
+
+        async function addManualUser() {
+            const input = document.getElementById('manual-user-input');
+            const val = input.value.trim();
+            if (!val || !activeModalRole) return;
+
+            const cleanUn = val.startsWith('@') ? val : `@${val}`;
+            await toggleRoleUser(activeModalRole, null, cleanUn, true);
+            input.value = '';
+        }
 
         async function joinRole(roleName) {
             triggerHaptic('light');
@@ -540,34 +821,6 @@
                 showToast('Ошибка подключения');
             }
         }
-
-        async function addMemberByUsername(roleName) {
-            const username = prompt(`Введите @username участника для добавления в роль ${roleName}:`);
-            if (!username || !username.trim()) return;
-            const cleanUsername = username.trim().startsWith('@') ? username.trim() : `@${username.trim()}`;
-            triggerHaptic('medium');
-            try {
-                const res = await fetch('/api/join', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        chat_id: parseInt(chatId),
-                        role_name: roleName,
-                        username: cleanUsername
-                    })
-                });
-                const data = await res.json();
-                if (data.status === 'success') {
-                    showToast(`${cleanUsername} добавлен в ${roleName}`);
-                    fetchRoles();
-                } else if (data.status === 'already_in') {
-                    showToast(`${cleanUsername} уже состоит в роли`);
-                }
-            } catch (e) {
-                showToast('Ошибка подключения');
-            }
-        }
-
 
         async function leaveRole(roleName) {
             triggerHaptic('light');

@@ -79,6 +79,37 @@ async def handle_delete_role(request: web.Request):
     success = await db.delete_role(int(chat_id), role_name)
     return web.json_response({"status": "success" if success else "not_found"})
 
+async def handle_get_chat_members(request: web.Request):
+    chat_id = request.query.get("chat_id")
+    if not chat_id:
+        return web.json_response({"error": "chat_id is required"}, status=400)
+
+    try:
+        chat_id_int = int(chat_id)
+        members = await db.get_all_chat_users(chat_id_int)
+        
+        roles = await db.get_all_roles(chat_id_int)
+        user_roles_map = {}
+        for r in roles:
+            r_members = await db.get_role_members(chat_id_int, r)
+            for uid, uname in r_members:
+                if uid not in user_roles_map:
+                    user_roles_map[uid] = []
+                user_roles_map[uid].append(r)
+                
+        result = []
+        for uid, uname in members:
+            result.append({
+                "user_id": uid,
+                "username": uname,
+                "roles": user_roles_map.get(uid, [])
+            })
+            
+        return web.json_response({"members": result})
+    except Exception as e:
+        logging.error(f"Error fetching chat members: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
 async def handle_index(request: web.Request):
     return web.FileResponse(os.path.join(os.path.dirname(__file__), "web", "index.html"))
 
@@ -86,6 +117,7 @@ def create_web_app() -> web.Application:
     app = web.Application()
     app.router.add_get("/", handle_index)
     app.router.add_get("/api/roles", handle_get_roles)
+    app.router.add_get("/api/chat_members", handle_get_chat_members)
     app.router.add_post("/api/join", handle_join_role)
     app.router.add_post("/api/leave", handle_leave_role)
     app.router.add_post("/api/create", handle_create_role)
@@ -98,4 +130,5 @@ def create_web_app() -> web.Application:
     app.router.add_static("/assets/", assets_dir, name="assets")
     
     return app
+
 
