@@ -344,7 +344,22 @@ async def inline_query_handler(query: InlineQuery):
                 )
             )
 
+        if not results:
+            results.append(
+                InlineQueryResultArticle(
+                    id="role_prompt_empty",
+                    title="📢 Инлайн-призыв роли",
+                    description="Создайте роли в группе командой /create <роль>",
+                    thumbnail_url=default_thumb,
+                    input_message_content=InputTextMessageContent(
+                        message_text="💡 <b>В этой группе пока нет ролей.</b>\nСоздайте роль командой <code>/create &lt;название&gt;</code>.",
+                        parse_mode=ParseMode.HTML
+                    )
+                )
+            )
+
         await query.answer(results[:50], cache_time=0, is_personal=True)
+
     except Exception as e:
         print(f"Inline error: {e}")
         fallback = [
