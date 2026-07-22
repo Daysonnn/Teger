@@ -20,7 +20,7 @@ def get_main_menu_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     if webapp_url:
         url = f"{webapp_url}?chat_id={chat_id}"
         buttons.append([
-            InlineKeyboardButton(text="📱 Открыть ролевую панель", url=url)
+            InlineKeyboardButton(text="📱 Открыть ролевую панель", web_app=WebAppInfo(url=url))
         ])
     
     # 2 РЯД: Список ролей + Обновить
@@ -45,12 +45,13 @@ def get_back_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     if webapp_url:
         url = f"{webapp_url}?chat_id={chat_id}"
         buttons.append([
-            InlineKeyboardButton(text="📱 Открыть ролевую панель", url=url)
+            InlineKeyboardButton(text="📱 Открыть ролевую панель", web_app=WebAppInfo(url=url))
         ])
     buttons.append([
         InlineKeyboardButton(text="⬅️ Назад в меню", callback_data=f"cb:menu:{chat_id}")
     ])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 
 
 
