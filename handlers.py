@@ -178,9 +178,10 @@ async def cb_list(query: CallbackQuery):
             emoji = r_info["emoji"]
             members = await db.get_role_members(chat_id, role_name)
             if members:
-                members_str = ", ".join(f"<code>{html.escape(uname)}</code>" for _, uname in members)
+                members_str = ", ".join(f"<code>{html.escape(uname.lstrip('@'))}</code>" for _, uname in members)
             else:
                 members_str = "<i>участников нет</i>"
+
             blocks.append(f"• {emoji} <b>{html.escape(role_name)}</b> ({len(members)} чел.): {members_str}")
         
         blockquote_text = "\n".join(blocks)
@@ -397,8 +398,8 @@ async def list_roles(message: Message):
         emoji = r_info["emoji"]
         members = await db.get_role_members(chat_id, role_name)
         if members:
-            # Юзернеймы в <code> не призывают участников и не шлют пуши при просмотре /list!
-            members_str = ", ".join(f"<code>{html.escape(uname)}</code>" for _, uname in members)
+            # Удаляем символ @ при просмотре списка, чтобы Telegram ГАРАНТИРОВАННО не слал пуш-уведомления!
+            members_str = ", ".join(f"<code>{html.escape(uname.lstrip('@'))}</code>" for _, uname in members)
         else:
             members_str = "<i>участников нет</i>"
         blocks.append(f"• {emoji} <b>{html.escape(role_name)}</b> ({len(members)} чел.): {members_str}")
@@ -406,6 +407,7 @@ async def list_roles(message: Message):
     blockquote_text = "\n".join(blocks)
     full_text = f"📋 <b>Список ролей группы:</b>\n\n<blockquote expandable>{blockquote_text}</blockquote>"
     await message.reply(full_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
 
 
 @router.message(Command("notify"))
