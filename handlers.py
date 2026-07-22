@@ -166,26 +166,33 @@ async def cb_menu(query: CallbackQuery):
 @router.callback_query(F.data.startswith("cb:list:"))
 async def cb_list(query: CallbackQuery):
     chat_id = int(query.data.split(":")[2])
-    roles = await db.get_all_roles(chat_id)
+    roles_data = await db.get_all_roles_with_details(chat_id)
+    is_priv = (query.message.chat.type == ChatType.PRIVATE)
 
-    if not roles:
+    if not roles_data:
         text = "📋 <b>В этой группе пока нет ролей.</b>\n\nАдминистратор может создать роль командой <code>/create &lt;название&gt;</code>"
     else:
-        text = "📋 <b>Список Ролей Группы:</b>\n\n"
-        for role in roles:
-            members = await db.get_role_members(chat_id, role)
+        blocks = []
+        for r_info in roles_data:
+            role_name = r_info["name"]
+            emoji = r_info["emoji"]
+            members = await db.get_role_members(chat_id, role_name)
             if members:
-                members_str = ", ".join(format_user_mention(uid, uname) for uid, uname in members)
+                members_str = ", ".join(f"<code>{html.escape(uname)}</code>" for _, uname in members)
             else:
-                members_str = "<i>пусто</i>"
-            text += f"🛡️ <b>{html.escape(role)}</b> ({len(members)}): {members_str}\n"
+                members_str = "<i>участников нет</i>"
+            blocks.append(f"• {emoji} <b>{html.escape(role_name)}</b> ({len(members)} чел.): {members_str}")
+        
+        blockquote_text = "\n".join(blocks)
+        text = f"📋 <b>Список Ролей Группы:</b>\n\n<blockquote expandable>{blockquote_text}</blockquote>"
 
-    keyboard = get_back_keyboard(chat_id)
+    keyboard = get_back_keyboard(chat_id, is_private=is_priv)
     try:
         await query.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
     except Exception:
         pass
     await safe_answer(query)
+
 
 @router.callback_query(F.data == "cb:how_join")
 async def cb_how_join(query: CallbackQuery):
@@ -377,23 +384,29 @@ async def list_roles(message: Message):
     if not await is_group(message): return
 
     chat_id = message.chat.id
-    roles = await db.get_all_roles(chat_id)
+    roles_data = await db.get_all_roles_with_details(chat_id)
     keyboard = get_main_menu_keyboard(chat_id)
 
-    if not roles:
+    if not roles_data:
         await message.reply("📋 <b>Список ролей пуст!</b>", reply_markup=keyboard, parse_mode=ParseMode.HTML)
         return
 
-    text = "📋 <b>Список ролей группы:</b>\n\n"
-    for role in roles:
-        members = await db.get_role_members(chat_id, role)
+    blocks = []
+    for r_info in roles_data:
+        role_name = r_info["name"]
+        emoji = r_info["emoji"]
+        members = await db.get_role_members(chat_id, role_name)
         if members:
-            members_str = ", ".join(format_user_mention(uid, uname) for uid, uname in members)
+            # Юзернеймы в <code> не призывают участников и не шлют пуши при просмотре /list!
+            members_str = ", ".join(f"<code>{html.escape(uname)}</code>" for _, uname in members)
         else:
-            members_str = "<i>пусто</i>"
-        text += f"🛡️ <b>{html.escape(role)}</b> ({len(members)}): {members_str}\n"
+            members_str = "<i>участников нет</i>"
+        blocks.append(f"• {emoji} <b>{html.escape(role_name)}</b> ({len(members)} чел.): {members_str}")
 
-    await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+    blockquote_text = "\n".join(blocks)
+    full_text = f"📋 <b>Список ролей группы:</b>\n\n<blockquote expandable>{blockquote_text}</blockquote>"
+    await message.reply(full_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
 
 @router.message(Command("notify"))
 async def notify_role(message: Message, command: CommandObject, bot: Bot):
