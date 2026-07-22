@@ -349,10 +349,11 @@
 
     <!-- Заботки / Табы -->
     <div class="tabs-nav">
-        <button class="tab-btn active" onclick="switchTab('roles')">🛡️ Роли</button>
-        <button class="tab-btn" onclick="switchTab('create')">➕ Создать</button>
-        <button class="tab-btn" onclick="switchTab('stats')">📊 Статистика</button>
+        <button class="tab-btn active" onclick="switchTab('roles', this)">🛡️ Роли</button>
+        <button class="tab-btn" onclick="switchTab('create', this)">➕ Создать</button>
+        <button class="tab-btn" onclick="switchTab('stats', this)">📊 Статистика</button>
     </div>
+
 
     <!-- ТАБ 1: Список ролей -->
     <div id="tab-roles" class="tab-content active">
@@ -419,14 +420,17 @@
             setTimeout(() => { toast.classList.remove('visible'); }, 2000);
         }
 
-        function switchTab(tabName) {
+        function switchTab(tabName, btnElement) {
             triggerHaptic('light');
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
             
-            event.target.classList.add('active');
-            document.getElementById(`tab-${tabName}`).classList.add('active');
+            const targetBtn = btnElement || document.querySelector(`.tab-btn[onclick*="${tabName}"]`);
+            if (targetBtn) targetBtn.classList.add('active');
+            const targetContent = document.getElementById(`tab-${tabName}`);
+            if (targetContent) targetContent.classList.add('active');
         }
+
 
         async function fetchRoles() {
             if (!chatId) {
