@@ -251,13 +251,14 @@ async def inline_query_handler(query: InlineQuery):
     result = InlineQueryResultArticle(
         id=f"role_{query_text}",
         title=f"📢 Позвать роль: {query_text}",
-        description=f"Отправить призыв участников роли /{query_text}",
+        description=f"Нажмите, чтобы отправить призыв /{query_text}",
         thumbnail_url=default_thumb,
         input_message_content=InputTextMessageContent(
-            message_text=f"📢 <b>Призыв участников 🛡️ {html.escape(query_text)}!</b>\n\nНажмите <code>/{html.escape(query_text)}</code> для вызова участников.",
+            message_text=f"📢 <b>Призыв участников 🛡️ {html.escape(query_text)}!</b>\n\nНажмите /{html.escape(query_text)} для вызова участников.",
             parse_mode=ParseMode.HTML
         )
     )
+
 
     await query.answer([result], cache_time=1)
 
