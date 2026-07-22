@@ -23,7 +23,7 @@ def get_main_menu_keyboard(chat_id: int, is_private: bool = False) -> InlineKeyb
             btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", web_app=WebAppInfo(url=url))
         else:
             # Нативный диплинк Telegram (startapp) - открывает шторку Mini App прямо в Телеграме поверх группы!
-            tg_app_link = f"https://t.me/tegerrbot/app?startapp={chat_id}"
+            tg_app_link = f"https://t.me/tegerrbot?startapp={chat_id}"
             btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", url=tg_app_link)
         buttons.append([btn])
     
@@ -51,13 +51,14 @@ def get_back_keyboard(chat_id: int, is_private: bool = False) -> InlineKeyboardM
             url = f"{webapp_url}?chat_id={chat_id}"
             btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", web_app=WebAppInfo(url=url))
         else:
-            tg_app_link = f"https://t.me/tegerrbot/app?startapp={chat_id}"
+            tg_app_link = f"https://t.me/tegerrbot?startapp={chat_id}"
             btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", url=tg_app_link)
         buttons.append([btn])
     buttons.append([
         InlineKeyboardButton(text="⬅️ Назад в меню", callback_data=f"cb:menu:{chat_id}")
     ])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 
 
 
