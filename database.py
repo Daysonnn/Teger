@@ -1,12 +1,14 @@
-import sqlite3
+import aiosqlite
+from contextlib import asynccontextmanager
 
 DB_NAME = 'roles_bot.db'
+_db_initialized = False
 
-def init_db():
-    with sqlite3.connect(DB_NAME) as connect:
-        cursor = connect.cursor()
-
-        cursor.execute('''
+async def init_db():
+    global _db_initialized
+    async with aiosqlite.connect(DB_NAME) as conn:
+        await conn.execute("PRAGMA foreign_keys = ON;")
+        await conn.execute('''
             CREATE TABLE IF NOT EXISTS roles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 chat_id INTEGER NOT NULL,
@@ -15,7 +17,7 @@ def init_db():
             )
         ''')
         
-        cursor.execute('''
+        await conn.execute('''
             CREATE TABLE IF NOT EXISTS members (
                 role_id INTEGER,
                 user_id INTEGER,
@@ -24,58 +26,78 @@ def init_db():
                 UNIQUE(role_id, user_id)
             )
         ''')
-        connect.commit()
+        await conn.commit()
+    _db_initialized = True
 
-def create_role(chat_id, role_name):
+@asynccontextmanager
+async def get_db():
+    global _db_initialized
+    if not _db_initialized:
+        await init_db()
+    async with aiosqlite.connect(DB_NAME) as conn:
+        await conn.execute("PRAGMA foreign_keys = ON;")
+        yield conn
+
+async def create_role(chat_id: int, role_name: str) -> bool:
     try:
-        with sqlite3.connect(DB_NAME) as connect:
-            connect.execute('INSERT INTO roles (chat_id, name) VALUES (?, ?)', (chat_id, role_name,))
+        async with get_db() as conn:
+            await conn.execute('INSERT INTO roles (chat_id, name) VALUES (?, ?)', (chat_id, role_name))
+            await conn.commit()
             return True
-    except sqlite3.IntegrityError:
+    except aiosqlite.IntegrityError:
         return False
 
-def delete_role(chat_id, role_name):
-    with sqlite3.connect(DB_NAME) as connect:
-        connect.execute('DELETE FROM roles WHERE chat_id = ? AND name = ?', (chat_id, role_name,))
+async def delete_role(chat_id: int, role_name: str) -> bool:
+    async with get_db() as conn:
+        cursor = await conn.execute('DELETE FROM roles WHERE chat_id = ? AND name = ?', (chat_id, role_name))
+        await conn.commit()
+        return cursor.rowcount > 0
 
-def join_role(chat_id, role_name, user_id, username):
-    with sqlite3.connect(DB_NAME) as connect:
-        cursor = connect.execute('SELECT id FROM roles WHERE chat_id = ? AND name = ?', (chat_id, role_name,))
-        role = cursor.fetchone()
+async def join_role(chat_id: int, role_name: str, user_id: int, username: str) -> str:
+    async with get_db() as conn:
+        cursor = await conn.execute('SELECT id FROM roles WHERE chat_id = ? AND name = ?', (chat_id, role_name))
+        role = await cursor.fetchone()
         
         if not role:
             return "not_found"
         
         role_id = role[0]
         try:
-            connect.execute('INSERT INTO members (role_id, user_id, username) VALUES (?, ?, ?)', 
-                         (role_id, user_id, username))
+            await conn.execute(
+                'INSERT INTO members (role_id, user_id, username) VALUES (?, ?, ?) '
+                'ON CONFLICT(role_id, user_id) DO UPDATE SET username=excluded.username', 
+                (role_id, user_id, username)
+            )
+            await conn.commit()
             return "success"
-        except sqlite3.IntegrityError:
+        except aiosqlite.IntegrityError:
             return "already_in"
 
-def leave_role(chat_id, role_name, user_id):
-    with sqlite3.connect(DB_NAME) as connect:
-        cursor = connect.execute('SELECT id FROM roles WHERE chat_id = ? AND name = ?', (chat_id, role_name,))
-        role = cursor.fetchone()
+async def leave_role(chat_id: int, role_name: str, user_id: int) -> bool:
+    async with get_db() as conn:
+        cursor = await conn.execute('SELECT id FROM roles WHERE chat_id = ? AND name = ?', (chat_id, role_name))
+        role = await cursor.fetchone()
         if not role:
             return False
-        connect.execute('DELETE FROM members WHERE role_id = ? AND user_id = ?', (role[0], user_id))
-        return True
+        cursor = await conn.execute('DELETE FROM members WHERE role_id = ? AND user_id = ?', (role[0], user_id))
+        await conn.commit()
+        return cursor.rowcount > 0
 
-def get_all_roles(chat_id):
-    with sqlite3.connect(DB_NAME) as connect:
-        cursor = connect.execute('SELECT name FROM roles WHERE chat_id = ?', (chat_id,))
-        return [row[0] for row in cursor.fetchall()]
+async def get_all_roles(chat_id: int) -> list[str]:
+    async with get_db() as conn:
+        cursor = await conn.execute('SELECT name FROM roles WHERE chat_id = ?', (chat_id,))
+        rows = await cursor.fetchall()
+        return [row[0] for row in rows]
 
-def get_role_members(chat_id, role_name):
-    with sqlite3.connect(DB_NAME) as connect:
-        cursor = connect.execute('''
-            SELECT m.username 
+async def get_role_members(chat_id: int, role_name: str) -> list[tuple[int, str]]:
+    async with get_db() as conn:
+        cursor = await conn.execute('''
+            SELECT m.user_id, m.username 
             FROM members m
             JOIN roles r ON m.role_id = r.id
             WHERE r.chat_id = ? AND r.name = ?
-        ''', (chat_id, role_name,))
-        return [row[0] for row in cursor.fetchall()]
+        ''', (chat_id, role_name))
+        rows = await cursor.fetchall()
+        return rows
 
-init_db()
+

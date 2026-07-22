@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Менеджер Ролей</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            --bg-color: var(--tg-theme-bg-color, #ffffff);
+            --text-color: var(--tg-theme-text-color, #000000);
+            --hint-color: var(--tg-theme-hint-color, #8e8e93);
+            --link-color: var(--tg-theme-link-color, #007aff);
+            --button-color: var(--tg-theme-button-color, #007aff);
+            --button-text-color: var(--tg-theme-button-text-color, #ffffff);
+            --secondary-bg-color: var(--tg-theme-secondary-bg-color, #f2f2f7);
+            --border-color: rgba(60, 60, 67, 0.12);
+            --danger-color: #ff3b30;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            padding: 16px;
+            padding-bottom: 90px;
+        }
+
+        /* Шапка с нативным переключением закладок */
+        .app-header {
+            margin-bottom: 16px;
+        }
+
+        .app-header h1 {
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: -0.4px;
+        }
+
+        .app-header p {
+            font-size: 13px;
+            color: var(--hint-color);
+            margin-top: 2px;
+        }
+
+        /* Нативный Segmented Control (Табы) */
+        .tabs-nav {
+            display: flex;
+            background: var(--secondary-bg-color);
+            padding: 3px;
+            border-radius: 10px;
+            margin-bottom: 16px;
+            border: 1px solid var(--border-color);
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: none;
+            background: transparent;
+            color: var(--hint-color);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .tab-btn.active {
+            background: var(--bg-color);
+            color: var(--text-color);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        /* Поиск */
+        .search-box {
+            position: relative;
+            margin-bottom: 14px;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 10px 14px 10px 36px;
+            border-radius: 10px;
+            background: var(--secondary-bg-color);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            font-size: 14px;
+            outline: none;
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 14px;
+            color: var(--hint-color);
+        }
+
+        /* Карточки ролей */
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .roles-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .role-card {
+            background: var(--secondary-bg-color);
+            border-radius: 14px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            border: 1px solid var(--border-color);
+        }
+
+        .role-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .role-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .role-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: var(--button-color);
+            color: var(--button-text-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        .role-name {
+            font-size: 17px;
+            font-weight: 600;
+            letter-spacing: -0.3px;
+        }
+
+        .count-pill {
+            font-size: 12px;
+            color: var(--hint-color);
+            font-weight: 500;
+            background: var(--bg-color);
+            padding: 4px 10px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+        }
+
+        /* Чипы участников */
+        .members-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .member-chip {
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 13px;
+            color: var(--text-color);
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .member-chip.current-user {
+            background: rgba(0, 122, 255, 0.1);
+            border-color: rgba(0, 122, 255, 0.3);
+            color: var(--link-color);
+            font-weight: 600;
+        }
+
+        .empty-members {
+            font-size: 13px;
+            color: var(--hint-color);
+            font-style: italic;
+        }
+
+        /* Действия */
+        .role-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 4px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 10px 14px;
+            border-radius: 10px;
+            border: none;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            outline: none;
+            transition: opacity 0.15s ease;
+        }
+
+        .btn:active {
+            opacity: 0.7;
+        }
+
+        .btn-join {
+            background-color: var(--button-color);
+            color: var(--button-text-color);
+        }
+
+        .btn-leave {
+            background-color: rgba(142, 142, 147, 0.18);
+            color: var(--text-color);
+        }
+
+        .btn-share {
+            background-color: rgba(0, 122, 255, 0.12);
+            color: var(--link-color);
+            flex: initial;
+            padding: 10px 12px;
+        }
+
+        .btn-delete {
+            background-color: rgba(255, 59, 48, 0.12);
+            color: var(--danger-color);
+            flex: initial;
+            padding: 10px 12px;
+        }
+
+        /* Карточка создания роли */
+        .create-card {
+            background: var(--secondary-bg-color);
+            border-radius: 14px;
+            padding: 16px;
+            border: 1px solid var(--border-color);
+        }
+
+        .create-card h2 {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .create-input {
+            flex: 1;
+            padding: 11px 14px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-color);
+            color: var(--text-color);
+            font-size: 15px;
+            outline: none;
+        }
+
+        /* Статистика */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .stat-card {
+            background: var(--secondary-bg-color);
+            border-radius: 14px;
+            padding: 16px;
+            border: 1px solid var(--border-color);
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--button-color);
+            margin-top: 4px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--hint-color);
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        .status-toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: var(--text-color);
+            color: var(--bg-color);
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            transition: transform 0.25s ease;
+            z-index: 100;
+        }
+
+        .status-toast.visible {
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .loader {
+            text-align: center;
+            padding: 40px;
+            color: var(--hint-color);
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="app-header">
+        <h1>Панель Ролей</h1>
+        <p id="chat-info">Синхронизация...</p>
+    </div>
+
+    <!-- Заботки / Табы -->
+    <div class="tabs-nav">
+        <button class="tab-btn active" onclick="switchTab('roles')">🛡️ Роли</button>
+        <button class="tab-btn" onclick="switchTab('create')">➕ Создать</button>
+        <button class="tab-btn" onclick="switchTab('stats')">📊 Статистика</button>
+    </div>
+
+    <!-- ТАБ 1: Список ролей -->
+    <div id="tab-roles" class="tab-content active">
+        <div class="search-box">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="search-input" class="search-input" placeholder="Поиск по названию..." oninput="filterRoles()">
+        </div>
+        <div id="roles-list" class="roles-container">
+            <div class="loader">Загрузка...</div>
+        </div>
+    </div>
+
+    <!-- ТАБ 2: Создание роли -->
+    <div id="tab-create" class="tab-content">
+        <div class="create-card">
+            <h2>Создание новой роли</h2>
+            <div class="form-row">
+                <input type="text" id="new-role-input" class="create-input" placeholder="Название роли (например: dev)">
+                <button class="btn btn-join" style="flex: initial;" onclick="createNewRole()">Создать</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ТАБ 3: Статистика -->
+    <div id="tab-stats" class="tab-content">
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Всего ролей</div>
+                <div id="stat-roles-count" class="stat-number">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Участников</div>
+                <div id="stat-members-count" class="stat-number">0</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="status-toast"></div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.ready();
+
+        let currentUser = tg.initDataUnsafe.user || { id: 0, first_name: "Гость" };
+        const urlParams = new URLSearchParams(window.location.search);
+        let chatId = urlParams.get('chat_id') || tg.initDataUnsafe.start_param;
+        let allRolesCache = [];
+
+        document.getElementById('chat-info').textContent = chatId 
+            ? `Группа ID: ${chatId}` 
+            : `Пользователь: ${currentUser.first_name}`;
+
+        function triggerHaptic(type = 'light') {
+            if (tg.HapticFeedback) {
+                tg.HapticFeedback.impactOccurred(type);
+            }
+        }
+
+        function showToast(text) {
+            const toast = document.getElementById('toast');
+            toast.textContent = text;
+            toast.classList.add('visible');
+            setTimeout(() => { toast.classList.remove('visible'); }, 2000);
+        }
+
+        function switchTab(tabName) {
+            triggerHaptic('light');
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+        }
+
+        async function fetchRoles() {
+            if (!chatId) {
+                document.getElementById('roles-list').innerHTML = `
+                    <div class="loader">
+                        Откройте Mini App из группы,<br>чтобы загрузить её роли.
+                    </div>`;
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/roles?chat_id=${chatId}`);
+                const data = await res.json();
+                allRolesCache = data.roles || [];
+
+                let totalMembers = 0;
+                allRolesCache.forEach(r => totalMembers += r.members.length);
+
+                document.getElementById('stat-roles-count').textContent = allRolesCache.length;
+                document.getElementById('stat-members-count').textContent = totalMembers;
+
+                renderRoles(allRolesCache);
+            } catch (err) {
+                console.error("Ошибка загрузки:", err);
+                document.getElementById('roles-list').innerHTML = `
+                    <div class="loader" style="color: var(--danger-color);">
+                        Ошибка подключения к серверу
+                    </div>`;
+            }
+        }
+
+        function filterRoles() {
+            const query = document.getElementById('search-input').value.toLowerCase().trim();
+            const filtered = allRolesCache.filter(r => r.name.toLowerCase().includes(query));
+            renderRoles(filtered);
+        }
+
+        function renderRoles(roles) {
+            const container = document.getElementById('roles-list');
+            if (roles.length === 0) {
+                container.innerHTML = `<div class="loader">Ролей пока нет</div>`;
+                return;
+            }
+
+            container.innerHTML = roles.map(role => {
+                const isMember = role.members.some(m => m.user_id === currentUser.id);
+                const letter = role.name.charAt(0).toUpperCase();
+
+                const membersHtml = role.members.length > 0 
+                    ? role.members.map(m => {
+                        const isMe = m.user_id === currentUser.id;
+                        return `<span class="member-chip ${isMe ? 'current-user' : ''}">
+                            ${isMe ? '⭐ ' : ''}${escapeHtml(m.username)}
+                        </span>`;
+                    }).join('')
+                    : `<span class="empty-members">участников нет</span>`;
+
+                return `
+                    <div class="role-card">
+                        <div class="role-header">
+                            <div class="role-title">
+                                <div class="role-icon">${letter}</div>
+                                <div class="role-name">${escapeHtml(role.name)}</div>
+                            </div>
+                            <span class="count-pill">${role.members.length} чел.</span>
+                        </div>
+                        <div class="members-grid">
+                            ${membersHtml}
+                        </div>
+                        <div class="role-actions">
+                            ${isMember 
+                                ? `<button class="btn btn-leave" onclick="leaveRole('${role.name}')">Выйти</button>`
+                                : `<button class="btn btn-join" onclick="joinRole('${role.name}')">Вступить</button>`
+                            }
+                            <button class="btn btn-share" onclick="shareRoleLink('${role.name}')" title="Ссылка">🔗</button>
+                            <button class="btn btn-delete" onclick="deleteRole('${role.name}')" title="Удалить">🗑</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function joinRole(roleName) {
+            triggerHaptic('light');
+            const username = currentUser.username ? `@${currentUser.username}` : currentUser.first_name;
+            try {
+                const res = await fetch('/api/join', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: parseInt(chatId),
+                        role_name: roleName,
+                        user_id: currentUser.id,
+                        username: username
+                    })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    showToast(`Вы вступили в ${roleName}`);
+                    fetchRoles();
+                } else if (data.status === 'already_in') {
+                    showToast(`Вы уже в роли ${roleName}`);
+                }
+            } catch (e) {
+                showToast('Ошибка подключения');
+            }
+        }
+
+        async function leaveRole(roleName) {
+            triggerHaptic('light');
+            try {
+                const res = await fetch('/api/leave', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: parseInt(chatId),
+                        role_name: roleName,
+                        user_id: currentUser.id
+                    })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    showToast(`Вы покинули ${roleName}`);
+                    fetchRoles();
+                }
+            } catch (e) {
+                showToast('Ошибка подключения');
+            }
+        }
+
+        function shareRoleLink(roleName) {
+            triggerHaptic('medium');
+            const botUsername = "tegerrbot";
+            const shareUrl = `https://t.me/${botUsername}?start=join_${roleName}`;
+            navigator.clipboard.writeText(shareUrl);
+            showToast(`🔗 Ссылка на роль ${roleName} скопирована!`);
+        }
+
+        async function createNewRole() {
+            const input = document.getElementById('new-role-input');
+            const roleName = input.value.trim();
+            if (!roleName) return;
+
+            triggerHaptic('medium');
+            try {
+                const res = await fetch('/api/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: parseInt(chatId),
+                        role_name: roleName
+                    })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    showToast(`Роль ${roleName} создана`);
+                    input.value = '';
+                    switchTab('roles');
+                    fetchRoles();
+                } else {
+                    showToast('Такая роль уже есть');
+                }
+            } catch (e) {
+                showToast('Ошибка подключения');
+            }
+        }
+
+        async function deleteRole(roleName) {
+            if (!confirm(`Удалить роль "${roleName}"?`)) return;
+            triggerHaptic('medium');
+            try {
+                const res = await fetch('/api/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: parseInt(chatId),
+                        role_name: roleName
+                    })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    showToast(`Роль ${roleName} удалена`);
+                    fetchRoles();
+                }
+            } catch (e) {
+                showToast('Ошибка подключения');
+            }
+        }
+
+        function escapeHtml(text) {
+            return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+
+        fetchRoles();
+    </script>
+</body>
+</html>

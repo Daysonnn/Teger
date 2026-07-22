@@ -1,43 +1,99 @@
 import os
+import socket
+import asyncio
 import logging
+import aiohttp
+from aiohttp import web, TCPConnector
 from dotenv import load_dotenv
-from telegram import BotCommand
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
-import handlers 
+
+from aiogram import Bot, Dispatcher
+from aiogram.types import BotCommand, MenuButtonWebApp, WebAppInfo
+from aiogram.client.session.aiohttp import AiohttpSession
+
+import database as db
+import handlers
+from api import create_web_app
 
 load_dotenv()
 TOKEN = os.getenv("TOKEN")
+PROXY = os.getenv("PROXY")
+PORT = int(os.getenv("PORT", 8000))
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
-async def setup_commands(app: Application):
-    await app.bot.set_my_commands([
-        BotCommand("help", "Помощь"),
-        BotCommand("list", "Список ролей"),
-        BotCommand("join", "Вступить в роль"),
-        BotCommand("leave", "Выйти из роли"),
-        BotCommand("create", "(Админ) Создать роль"),
-        BotCommand("delete", "(Админ) Удалить роль"),
-    ])
+class CustomAiohttpSession(AiohttpSession):
+    """Сессия с IPv4 коннектором (если используется прокси)."""
+    async def create_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            connector = TCPConnector(family=socket.AF_INET)
+            self._session = aiohttp.ClientSession(
+                connector=connector,
+                json_serialize=self.json_dumps,
+            )
+        return self._session
 
-def main():
-    print("Запуск бота...")
-    app = Application.builder().token(TOKEN).post_init(setup_commands).build()
+async def setup_commands(bot: Bot):
+    commands = [
+        BotCommand(command="menu", description="Панель управления ролями"),
+        BotCommand(command="help", description="Справка"),
+        BotCommand(command="list", description="Список ролей"),
+        BotCommand(command="join", description="Вступить в роль"),
+        BotCommand(command="leave", description="Выйти из роли"),
+        BotCommand(command="create", description="(Админ) Создать роль"),
+        BotCommand(command="delete", description="(Админ) Удалить роль"),
+    ]
+    await bot.set_my_commands(commands)
 
-    app.add_handler(CommandHandler("start", handlers.start_help))
-    app.add_handler(CommandHandler("help", handlers.start_help))
+    webapp_url = os.getenv("WEBAPP_URL")
+    if webapp_url:
+        try:
+            await bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(text="📱 Mini App", web_app=WebAppInfo(url=webapp_url))
+            )
+        except Exception as e:
+            logging.warning(f"Не удалось установить кнопку меню: {e}")
+
+async def start_web_server():
+    app = create_web_app()
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+    print(f"🌐 Веб-сервер Mini App запущен на сервере (порт {PORT})")
+    return runner
+
+async def main():
+    if not TOKEN:
+        logging.error("Ошибка: TOKEN не найден в .env файле!")
+        return
+
+    print("🚀 Инициализация БД...")
+    await db.init_db()
+
+    web_runner = await start_web_server()
+
+    if PROXY:
+        print(f"🔒 Использование прокси из .env: {PROXY}")
+        session = CustomAiohttpSession(proxy=PROXY)
+        bot = Bot(token=TOKEN, session=session)
+    else:
+        print("🌐 Прямое подключение к Telegram API")
+        bot = Bot(token=TOKEN)
+
+    dp = Dispatcher()
+    dp.include_router(handlers.router)
+
+    await setup_commands(bot)
     
-    app.add_handler(CommandHandler("create", handlers.create_role))
-    app.add_handler(CommandHandler("delete", handlers.delete_role))
-    app.add_handler(CommandHandler("add", handlers.add_to_role))
-    
-    app.add_handler(CommandHandler("join", handlers.join_role))
-    app.add_handler(CommandHandler("leave", handlers.leave_role))
-    app.add_handler(CommandHandler("list", handlers.list_roles))
-    
-    app.add_handler(MessageHandler(filters.COMMAND, handlers.dynamic_role_call))
-
-    app.run_polling()
+    try:
+        print("🤖 Бот запущен и ожидает сообщений...")
+        await dp.start_polling(bot)
+    finally:
+        await web_runner.cleanup()
+        await bot.session.close()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
