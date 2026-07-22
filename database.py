@@ -220,3 +220,23 @@ async def get_inline_role_members(role_name: str) -> list[tuple[int, str]]:
             ''', (role_name,))
         rows = await cursor.fetchall()
         return rows
+
+async def get_global_roles_with_details() -> list[dict]:
+    """Возвращает все уникальные роли для показа в инлайн-подсказках."""
+    async with get_db() as conn:
+        cursor = await conn.execute('''
+            SELECT DISTINCT r.name, COALESCE(r.emoji, "🛡️")
+            FROM roles r
+        ''')
+        rows = await cursor.fetchall()
+        result = []
+        for r_name, r_emoji in rows:
+            m_cursor = await conn.execute('''
+                SELECT COUNT(DISTINCT m.user_id) FROM members m
+                JOIN roles r ON m.role_id = r.id
+                WHERE r.name = ?
+            ''', (r_name,))
+            count_row = await m_cursor.fetchone()
+            count = count_row[0] if count_row else 0
+            result.append({"name": r_name, "emoji": r_emoji, "count": count})
+        return result
