@@ -33,14 +33,13 @@ def get_main_menu_keyboard(chat_id: int, is_private: bool = False) -> InlineKeyb
         InlineKeyboardButton(text="🔄 Обновить", callback_data=f"cb:menu:{chat_id}")
     ])
     
-    # 3 РЯД: Справка
+    # 3 РЯД: Компактная Справка
     buttons.append([
-        InlineKeyboardButton(text="➕ Как вступить", callback_data="cb:how_join"),
-        InlineKeyboardButton(text="⚡ Inline-режим", callback_data="cb:inline_help"),
-        InlineKeyboardButton(text="👑 Для админов", callback_data="cb:admin_help")
+        InlineKeyboardButton(text="❓ Справка и Команды", callback_data="cb:help_unified")
     ])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 
 def get_back_keyboard(chat_id: int, is_private: bool = False) -> InlineKeyboardMarkup:
     """Кнопка возврата в главное меню."""
@@ -206,39 +205,34 @@ async def cb_how_join(query: CallbackQuery):
         pass
     await safe_answer(query)
 
-@router.callback_query(F.data == "cb:inline_help")
-async def cb_inline_help(query: CallbackQuery):
+@router.callback_query(F.data == "cb:help_unified")
+async def cb_help_unified(query: CallbackQuery):
     chat_id = query.message.chat.id
+    is_priv = (query.message.chat.type == ChatType.PRIVATE)
     bot_user = (await query.bot.get_me()).username
+    
     text = (
-        "⚡ <b>Инлайн Режим (Inline Mode)</b>\n\n"
-        "Призывать роли можно из любого диалога или личных сообщений!\n\n"
-        f"Просто введите в поле ввода:\n"
-        f"<code>@{bot_user} &lt;роль&gt;</code>"
+        "❓ <b>Справка и Команды Бота</b>\n\n"
+        "<b>👑 Команды Администратора:</b>\n"
+        "• <code>/create &lt;роль&gt;</code> — Создать новую роль\n"
+        "• <code>/delete &lt;роль&gt;</code> — Удалить роль\n"
+        "• <code>/add &lt;роль&gt; @user</code> — Добавить участника в роль\n"
+        "• <code>/notify &lt;роль&gt; &lt;текст&gt;</code> — Срочное уведомление роли\n\n"
+        "<b>👥 Вызов участников:</b>\n"
+        "• <code>/all</code> — Позвать ВСЕХ участников чата\n"
+        "• <code>/&lt;роль&gt;</code> — Позвать участников роли (напр. <code>/dev</code>)\n"
+        "• <code>/join &lt;роль&gt;</code> / <code>/leave &lt;роль&gt;</code> — Вступить/выйти\n\n"
+        "<b>⚡ Inline-режим:</b>\n"
+        f"Впишите в поле ввода любого чата:\n"
+        f"<code>@{bot_user} dev</code> или <code>@{bot_user} all</code>"
     )
-    keyboard = get_back_keyboard(chat_id)
+    keyboard = get_back_keyboard(chat_id, is_private=is_priv)
     try:
         await query.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
     except Exception:
         pass
     await safe_answer(query)
 
-@router.callback_query(F.data == "cb:admin_help")
-async def cb_admin_help(query: CallbackQuery):
-    chat_id = query.message.chat.id
-    text = (
-        "👑 <b>Справка Администратора</b>\n\n"
-        "<b>Админ-команды в чате:</b>\n"
-        "• <code>/create &lt;роль&gt;</code> — Создать роль\n"
-        "• <code>/delete &lt;роль&gt;</code> — Удалить роль\n"
-        "• <code>/add &lt;роль&gt;</code> — Добавить участника ответом"
-    )
-    keyboard = get_back_keyboard(chat_id)
-    try:
-        await query.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
-    except Exception:
-        pass
-    await safe_answer(query)
 
 
 @router.inline_query()
@@ -426,14 +420,14 @@ async def notify_role(message: Message, command: CommandObject, bot: Bot):
 
     mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
     mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
-    keyboard = get_main_menu_keyboard(chat_id)
 
     text = (
         f"🚨 <b>СРОЧНОЕ УВЕДОМЛЕНИЕ ДЛЯ {emoji} {html.escape(role_name)}!</b> ({len(members)} чел.)\n\n"
         f"<blockquote>📢 <i>«{html.escape(notice_text)}»</i></blockquote>\n\n"
         f"<blockquote expandable>{mentions_str}</blockquote>"
     )
-    await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+    # Чистое независимое сообщение без меню-кнопок
+    await message.reply(text, parse_mode=ParseMode.HTML)
     
     sender_un = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
     await db.add_audit_log(chat_id, message.from_user.id, sender_un, "Уведомление роли", f"Роль: {role_name}")
@@ -526,13 +520,13 @@ async def call_all_members(message: Message):
 
     mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
     mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
-    keyboard = get_main_menu_keyboard(chat_id)
 
     text = (
         f"📢 <b>Призыв ВСЕХ участников чата!</b> ({len(members)} чел.)\n\n"
         f"<blockquote expandable>{mentions_str}</blockquote>"
     )
-    await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+    # Чистое независимое сообщение
+    await message.reply(text, parse_mode=ParseMode.HTML)
 
 @router.message(F.text.startswith("/"))
 async def dynamic_role_call(message: Message):
@@ -547,20 +541,22 @@ async def dynamic_role_call(message: Message):
     raw_cmd = message.text[1:].split()[0]
     command_text = raw_cmd.split('@')[0]
     
-    if command_text in ["start", "help", "menu", "create", "delete", "join", "leave", "list", "add", "all", "everyone"]:
+    if command_text in ["start", "help", "menu", "create", "delete", "join", "leave", "list", "add", "all", "everyone", "notify"]:
         return
 
     chat_id = message.chat.id
+    emoji = await db.get_role_emoji(chat_id, command_text)
     members = await db.get_role_members(chat_id, command_text)
 
     if members:
         mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
         mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
-        keyboard = get_main_menu_keyboard(chat_id)
         
         text = (
-            f"📢 <b>Призыв участников 🛡️ {html.escape(command_text)}!</b> ({len(members)} чел.)\n\n"
+            f"📢 <b>Призыв участников {emoji} {html.escape(command_text)}!</b> ({len(members)} чел.)\n\n"
             f"<blockquote expandable>{mentions_str}</blockquote>"
         )
-        await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        # Чистое независимое сообщение
+        await message.reply(text, parse_mode=ParseMode.HTML)
+
 
