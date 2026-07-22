@@ -12,16 +12,18 @@ import database as db
 
 router = Router()
 
-def get_main_menu_keyboard(chat_id: int) -> InlineKeyboardMarkup:
-    """Главное меню с кнопкой Mini App."""
+def get_main_menu_keyboard(chat_id: int, is_private: bool = False) -> InlineKeyboardMarkup:
+    """Главное меню с адаптивной кнопкой Mini App (web_app для лички, url для групп)."""
     webapp_url = os.getenv("WEBAPP_URL")
     buttons = []
     
     if webapp_url:
         url = f"{webapp_url}?chat_id={chat_id}"
-        buttons.append([
-            InlineKeyboardButton(text="📱 Открыть ролевую панель", web_app=WebAppInfo(url=url))
-        ])
+        if is_private:
+            btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", web_app=WebAppInfo(url=url))
+        else:
+            btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", url=url)
+        buttons.append([btn])
     
     # 2 РЯД: Список ролей + Обновить
     buttons.append([
@@ -38,19 +40,22 @@ def get_main_menu_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_back_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+def get_back_keyboard(chat_id: int, is_private: bool = False) -> InlineKeyboardMarkup:
     """Кнопка возврата в главное меню."""
     webapp_url = os.getenv("WEBAPP_URL")
     buttons = []
     if webapp_url:
         url = f"{webapp_url}?chat_id={chat_id}"
-        buttons.append([
-            InlineKeyboardButton(text="📱 Открыть ролевую панель", web_app=WebAppInfo(url=url))
-        ])
+        if is_private:
+            btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", web_app=WebAppInfo(url=url))
+        else:
+            btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", url=url)
+        buttons.append([btn])
     buttons.append([
         InlineKeyboardButton(text="⬅️ Назад в меню", callback_data=f"cb:menu:{chat_id}")
     ])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 
 
 
@@ -91,11 +96,12 @@ async def build_menu_text(chat_id: int) -> str:
 @router.message(CommandStart())
 async def start_cmd(message: Message, command: CommandObject):
     chat_id = message.chat.id
+    is_priv = (message.chat.type == ChatType.PRIVATE)
     
     # Диплинк для моментального вступления
     if command.args and command.args.startswith("join_"):
         role_name = command.args[5:]
-        if message.chat.type != ChatType.PRIVATE:
+        if not is_priv:
             user = message.from_user
             username = f"@{user.username}" if user.username else user.first_name
             res = await db.join_role(chat_id, role_name, user.id, username)
@@ -107,15 +113,16 @@ async def start_cmd(message: Message, command: CommandObject):
                 return
 
     text = await build_menu_text(chat_id)
-    keyboard = get_main_menu_keyboard(chat_id)
+    keyboard = get_main_menu_keyboard(chat_id, is_private=is_priv)
     await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
 @router.message(Command("help"))
 @router.message(Command("menu"))
 async def help_cmd(message: Message):
     chat_id = message.chat.id
+    is_priv = (message.chat.type == ChatType.PRIVATE)
     text = await build_menu_text(chat_id)
-    keyboard = get_main_menu_keyboard(chat_id)
+    keyboard = get_main_menu_keyboard(chat_id, is_private=is_priv)
     await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
 async def safe_answer(query: CallbackQuery, text: str | None = None):
