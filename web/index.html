@@ -861,6 +861,7 @@
             const container = document.getElementById('modal-members-list');
             const targetRole = allRolesCache.find(r => r.name === activeModalRole);
             const roleMemberIds = targetRole ? targetRole.members.map(m => m.user_id) : [];
+            const roleMemberUsernames = targetRole ? targetRole.members.map(m => (m.username || '').toLowerCase()) : [];
 
             if (members.length === 0) {
                 container.innerHTML = `<div class="loader">Список участников пуст</div>`;
@@ -868,7 +869,7 @@
             }
 
             container.innerHTML = members.map(m => {
-                const inRole = roleMemberIds.includes(m.user_id);
+                const inRole = (m.user_id && roleMemberIds.includes(m.user_id)) || (m.username && roleMemberUsernames.includes(m.username.toLowerCase()));
                 return `
                     <div class="member-select-row">
                         <div class="user-info">👤 ${escapeHtml(m.username)}</div>

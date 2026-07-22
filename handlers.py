@@ -564,7 +564,7 @@ async def add_to_role(message: Message, command: CommandObject, bot: Bot):
         already = []
         for un in raw_usernames:
             clean_un = un if un.startswith("@") else f"@{un}"
-            synthetic_id = abs(hash(clean_un.lower()))
+            synthetic_id = db.get_user_id_from_username(clean_un)
             res = await db.join_role(chat_id, role_name, synthetic_id, clean_un)
             if res == "success":
                 added.append(html.escape(clean_un))

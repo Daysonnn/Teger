@@ -40,7 +40,7 @@ async def handle_join_role(request: web.Request):
 
     if not user_id and username:
         clean_un = username if username.startswith("@") else f"@{username}"
-        user_id = abs(hash(clean_un.lower()))
+        user_id = db.get_user_id_from_username(clean_un)
         username = clean_un
 
     result = await db.join_role(int(chat_id), role_name, int(user_id), username or str(user_id))
@@ -103,17 +103,25 @@ async def handle_get_chat_members(request: web.Request):
         for r in roles:
             r_members = await db.get_role_members(chat_id_int, r)
             for uid, uname in r_members:
-                if uid not in user_roles_map:
-                    user_roles_map[uid] = []
-                user_roles_map[uid].append(r)
+                key = uid if uid else (uname.lower() if uname else None)
+                if key:
+                    if key not in user_roles_map:
+                        user_roles_map[key] = []
+                    if r not in user_roles_map[key]:
+                        user_roles_map[key].append(r)
                 
         result = []
+        seen_keys = set()
         for uid, uname in members:
-            result.append({
-                "user_id": uid,
-                "username": uname,
-                "roles": user_roles_map.get(uid, [])
-            })
+            key = uid if uid else (uname.lower() if uname else None)
+            if key and key not in seen_keys:
+                seen_keys.add(key)
+                roles_for_user = user_roles_map.get(uid, []) or user_roles_map.get(uname.lower() if uname else "", [])
+                result.append({
+                    "user_id": uid,
+                    "username": uname,
+                    "roles": roles_for_user
+                })
             
         return web.json_response({"members": result})
     except Exception as e:
