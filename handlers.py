@@ -247,120 +247,119 @@ async def cb_help_unified(query: CallbackQuery):
 async def inline_query_handler(query: InlineQuery):
     try:
         query_text = query.query.strip().lower()
-
-    
-    webapp_url = os.getenv("WEBAPP_URL")
-    if webapp_url:
-        default_thumb = f"{webapp_url.rstrip('/')}/assets/teger.png"
-    else:
-        default_thumb = "https://cdn-icons-png.flaticon.com/512/9402/9402126.png"
-
-    all_roles = await db.get_global_roles_with_details()
-    results = []
-
-    # 1. Опция призыва всех участников /all
-    all_members = await db.get_inline_role_members("all")
-    if all_members and (not query_text or "all".startswith(query_text) or "все".startswith(query_text)):
-        all_mentions = [format_user_mention(uid, uname) for uid, uname in all_members]
-        all_str = "\n".join(f"👤 {m}" for m in all_mentions)
-        results.append(
-            InlineQueryResultArticle(
-                id="role_all",
-                title=f"👥 all — Позвать ВСЕХ участников ({len(all_members)} чел.)",
-                description="Призыв всех участников чата",
-                thumbnail_url=default_thumb,
-                input_message_content=InputTextMessageContent(
-                    message_text=f"📢 <b>Призыв ВСЕХ участников чата!</b> ({len(all_members)} чел.)\n\n<blockquote expandable>{all_str}</blockquote>",
-                    parse_mode=ParseMode.HTML
-                )
-            )
-        )
-
-    # 2. Выпадающие подсказки для всех существующих ролей
-    for r_info in all_roles:
-        role_name = r_info["name"]
-        emoji = r_info["emoji"]
         
-        # Фильтрация по совпадению ввода (по началу слова или подстроке)
-        if query_text and (query_text not in role_name.lower()):
-            continue
-
-        members = await db.get_inline_role_members(role_name)
-        if members:
-            mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
-            mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
-            msg_content = (
-                f"📢 <b>Призыв участников {emoji} {html.escape(role_name)}!</b> ({len(members)} чел.)\n\n"
-                f"<blockquote expandable>{mentions_str}</blockquote>"
-            )
-            desc = f"Призыв {len(members)} участников роли"
+        webapp_url = os.getenv("WEBAPP_URL")
+        if webapp_url:
+            default_thumb = f"{webapp_url.rstrip('/')}/assets/teger.png"
         else:
-            msg_content = (
-                f"📢 <b>Призыв участников {emoji} {html.escape(role_name)}!</b>\n\n"
-                f"Нажмите /{html.escape(role_name)} для вызова участников."
-            )
-            desc = f"Отправить призыв /{role_name}"
+            default_thumb = "https://cdn-icons-png.flaticon.com/512/9402/9402126.png"
 
-        results.append(
+        all_roles = await db.get_global_roles_with_details()
+        results = []
+
+        # 1. Опция призыва всех участников /all
+        all_members = await db.get_inline_role_members("all")
+        if all_members and (not query_text or "all".startswith(query_text) or "все".startswith(query_text)):
+            all_mentions = [format_user_mention(uid, uname) for uid, uname in all_members]
+            all_str = "\n".join(f"👤 {m}" for m in all_mentions)
+            results.append(
+                InlineQueryResultArticle(
+                    id="role_all",
+                    title=f"👥 all — Позвать ВСЕХ участников ({len(all_members)} чел.)",
+                    description="Призыв всех участников чата",
+                    thumbnail_url=default_thumb,
+                    input_message_content=InputTextMessageContent(
+                        message_text=f"📢 <b>Призыв ВСЕХ участников чата!</b> ({len(all_members)} чел.)\n\n<blockquote expandable>{all_str}</blockquote>",
+                        parse_mode=ParseMode.HTML
+                    )
+                )
+            )
+
+        # 2. Выпадающие подсказки для всех существующих ролей
+        for r_info in all_roles:
+            role_name = r_info["name"]
+            emoji = r_info["emoji"]
+            
+            # Фильтрация по совпадению ввода (по началу слова или подстроке)
+            if query_text and (query_text not in role_name.lower()):
+                continue
+
+            members = await db.get_inline_role_members(role_name)
+            if members:
+                mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
+                mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
+                msg_content = (
+                    f"📢 <b>Призыв участников {emoji} {html.escape(role_name)}!</b> ({len(members)} чел.)\n\n"
+                    f"<blockquote expandable>{mentions_str}</blockquote>"
+                )
+                desc = f"Призыв {len(members)} участников роли"
+            else:
+                msg_content = (
+                    f"📢 <b>Призыв участников {emoji} {html.escape(role_name)}!</b>\n\n"
+                    f"Нажмите /{html.escape(role_name)} для вызова участников."
+                )
+                desc = f"Отправить призыв /{role_name}"
+
+            results.append(
+                InlineQueryResultArticle(
+                    id=f"role_{role_name}",
+                    title=f"{emoji} {role_name} ({len(members)} чел.)",
+                    description=desc,
+                    thumbnail_url=default_thumb,
+                    input_message_content=InputTextMessageContent(
+                        message_text=msg_content,
+                        parse_mode=ParseMode.HTML
+                    )
+                )
+            )
+
+        # 3. Резервный вариант если роль введена вручную и её ещё нет в списке
+        if query_text and not any(r.id == f"role_{query_text}" for r in results):
+            members = await db.get_inline_role_members(query_text)
+            if members:
+                mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
+                mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
+                msg_content = (
+                    f"📢 <b>Призыв участников 🛡️ {html.escape(query_text)}!</b> ({len(members)} чел.)\n\n"
+                    f"<blockquote expandable>{mentions_str}</blockquote>"
+                )
+                desc = f"Позвать {len(members)} участников роли"
+            else:
+                msg_content = (
+                    f"📢 <b>Призыв участников 🛡️ {html.escape(query_text)}!</b>\n\n"
+                    f"Нажмите /{html.escape(query_text)} для вызова участников."
+                )
+                desc = f"Отправить призыв /{query_text}"
+
+            results.append(
+                InlineQueryResultArticle(
+                    id=f"role_{query_text}",
+                    title=f"📢 Позвать роль: {query_text}",
+                    description=desc,
+                    thumbnail_url=default_thumb,
+                    input_message_content=InputTextMessageContent(
+                        message_text=msg_content,
+                        parse_mode=ParseMode.HTML
+                    )
+                )
+            )
+
+        await query.answer(results[:50], cache_time=0, is_personal=True)
+    except Exception as e:
+        print(f"Inline error: {e}")
+        fallback = [
             InlineQueryResultArticle(
-                id=f"role_{role_name}",
-                title=f"{emoji} {role_name} ({len(members)} чел.)",
-                description=desc,
-                thumbnail_url=default_thumb,
+                id="prompt_fallback",
+                title="📢 Призыв роли",
+                description="Введите название роли (например: dev или all)",
                 input_message_content=InputTextMessageContent(
-                    message_text=msg_content,
+                    message_text="💡 Введите название роли после <code>@tegerrbot</code> для призыва.",
                     parse_mode=ParseMode.HTML
                 )
             )
-        )
+        ]
+        await query.answer(fallback, cache_time=0, is_personal=True)
 
-    # 3. Резервный вариант если роль введена вручную и её ещё нет в списке
-    if query_text and not any(r.id == f"role_{query_text}" for r in results):
-        members = await db.get_inline_role_members(query_text)
-        if members:
-            mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
-            mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
-            msg_content = (
-                f"📢 <b>Призыв участников 🛡️ {html.escape(query_text)}!</b> ({len(members)} чел.)\n\n"
-                f"<blockquote expandable>{mentions_str}</blockquote>"
-            )
-            desc = f"Позвать {len(members)} участников роли"
-        else:
-            msg_content = (
-                f"📢 <b>Призыв участников 🛡️ {html.escape(query_text)}!</b>\n\n"
-                f"Нажмите /{html.escape(query_text)} для вызова участников."
-            )
-            desc = f"Отправить призыв /{query_text}"
-
-        results.append(
-            InlineQueryResultArticle(
-                id=f"role_{query_text}",
-                title=f"📢 Позвать роль: {query_text}",
-                description=desc,
-                thumbnail_url=default_thumb,
-                input_message_content=InputTextMessageContent(
-                    message_text=msg_content,
-                    parse_mode=ParseMode.HTML
-                )
-            )
-        )
-
-    # Устанавливаем cache_time=0 и is_personal=True, чтобы Telegram мгновенно выводил весь список при вводе пробела!
-    await query.answer(results[:50], cache_time=0, is_personal=True)
-except Exception as e:
-    print(f"Inline error: {e}")
-    fallback = [
-        InlineQueryResultArticle(
-            id="prompt_fallback",
-            title="📢 Призыв роли",
-            description="Введите название роли (например: dev или all)",
-            input_message_content=InputTextMessageContent(
-                message_text="💡 Введите название роли после <code>@tegerrbot</code> для призыва.",
-                parse_mode=ParseMode.HTML
-            )
-        )
-    ]
-    await query.answer(fallback, cache_time=0, is_personal=True)
 
 
 
