@@ -13,16 +13,18 @@ import database as db
 router = Router()
 
 def get_main_menu_keyboard(chat_id: int, is_private: bool = False) -> InlineKeyboardMarkup:
-    """Главное меню с адаптивной кнопкой Mini App (web_app для лички, url для групп)."""
+    """Главное меню с кнопкой Mini App."""
     webapp_url = os.getenv("WEBAPP_URL")
     buttons = []
     
     if webapp_url:
-        url = f"{webapp_url}?chat_id={chat_id}"
         if is_private:
+            url = f"{webapp_url}?chat_id={chat_id}"
             btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", web_app=WebAppInfo(url=url))
         else:
-            btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", url=url)
+            # Нативный диплинк Telegram (startapp) - открывает шторку Mini App прямо в Телеграме поверх группы!
+            tg_app_link = f"https://t.me/tegerrbot/app?startapp={chat_id}"
+            btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", url=tg_app_link)
         buttons.append([btn])
     
     # 2 РЯД: Список ролей + Обновить
@@ -45,16 +47,18 @@ def get_back_keyboard(chat_id: int, is_private: bool = False) -> InlineKeyboardM
     webapp_url = os.getenv("WEBAPP_URL")
     buttons = []
     if webapp_url:
-        url = f"{webapp_url}?chat_id={chat_id}"
         if is_private:
+            url = f"{webapp_url}?chat_id={chat_id}"
             btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", web_app=WebAppInfo(url=url))
         else:
-            btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", url=url)
+            tg_app_link = f"https://t.me/tegerrbot/app?startapp={chat_id}"
+            btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", url=tg_app_link)
         buttons.append([btn])
     buttons.append([
         InlineKeyboardButton(text="⬅️ Назад в меню", callback_data=f"cb:menu:{chat_id}")
     ])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 
 
 
