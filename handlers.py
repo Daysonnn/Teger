@@ -258,7 +258,7 @@ async def inline_query_handler(query: InlineQuery):
 
     # 1. Опция призыва всех участников /all
     all_members = await db.get_inline_role_members("all")
-    if all_members:
+    if all_members and (not query_text or "all".startswith(query_text) or "все".startswith(query_text)):
         all_mentions = [format_user_mention(uid, uname) for uid, uname in all_members]
         all_str = "\n".join(f"👤 {m}" for m in all_mentions)
         results.append(
@@ -279,8 +279,8 @@ async def inline_query_handler(query: InlineQuery):
         role_name = r_info["name"]
         emoji = r_info["emoji"]
         
-        # Фильтрация по совпадению ввода
-        if query_text and not role_name.lower().startswith(query_text):
+        # Фильтрация по совпадению ввода (по началу слова или подстроке)
+        if query_text and (query_text not in role_name.lower()):
             continue
 
         members = await db.get_inline_role_members(role_name)
@@ -312,7 +312,7 @@ async def inline_query_handler(query: InlineQuery):
             )
         )
 
-    # 3. Резервный вариант если роль введена вручную
+    # 3. Резервный вариант если роль введена вручную и её ещё нет в списке
     if query_text and not any(r.id == f"role_{query_text}" for r in results):
         members = await db.get_inline_role_members(query_text)
         if members:
@@ -343,7 +343,9 @@ async def inline_query_handler(query: InlineQuery):
             )
         )
 
-    await query.answer(results[:50], cache_time=1)
+    # Устанавливаем cache_time=0 и is_personal=True, чтобы Telegram мгновенно выводил весь список при вводе пробела!
+    await query.answer(results[:50], cache_time=0, is_personal=True)
+
 
 
 
