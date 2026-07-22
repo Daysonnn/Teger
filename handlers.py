@@ -248,19 +248,36 @@ async def inline_query_handler(query: InlineQuery):
         await query.answer([result], cache_time=1)
         return
 
+    members = await db.get_inline_role_members(query_text)
+    
+    if members:
+        mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
+        mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
+        msg_content = (
+            f"📢 <b>Призыв участников 🛡️ {html.escape(query_text)}!</b> ({len(members)} чел.)\n\n"
+            f"<blockquote expandable>{mentions_str}</blockquote>"
+        )
+        description_text = f"Позвать {len(members)} участников роли"
+    else:
+        msg_content = (
+            f"📢 <b>Призыв участников 🛡️ {html.escape(query_text)}!</b>\n\n"
+            f"Нажмите /{html.escape(query_text)} для вызова участников."
+        )
+        description_text = f"Отправить призыв /{query_text}"
+
     result = InlineQueryResultArticle(
         id=f"role_{query_text}",
         title=f"📢 Позвать роль: {query_text}",
-        description=f"Нажмите, чтобы отправить призыв /{query_text}",
+        description=description_text,
         thumbnail_url=default_thumb,
         input_message_content=InputTextMessageContent(
-            message_text=f"📢 <b>Призыв участников 🛡️ {html.escape(query_text)}!</b>\n\nНажмите /{html.escape(query_text)} для вызова участников.",
+            message_text=msg_content,
             parse_mode=ParseMode.HTML
         )
     )
 
-
     await query.answer([result], cache_time=1)
+
 
 
 @router.message(Command("create"))

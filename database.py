@@ -137,3 +137,24 @@ async def get_role_members(chat_id: int, role_name: str) -> list[tuple[int, str]
         ''', (chat_id, role_name))
         rows = await cursor.fetchall()
         return rows
+
+async def get_inline_role_members(role_name: str) -> list[tuple[int, str]]:
+    """Возвращает участников роли для прямого инлайн-тега."""
+    async with get_db() as conn:
+        if role_name in ["all", "everyone"]:
+            cursor = await conn.execute('''
+                SELECT DISTINCT user_id, username FROM (
+                    SELECT user_id, username FROM chat_users
+                    UNION
+                    SELECT user_id, username FROM members
+                )
+            ''')
+        else:
+            cursor = await conn.execute('''
+                SELECT DISTINCT m.user_id, m.username 
+                FROM members m
+                JOIN roles r ON m.role_id = r.id
+                WHERE r.name = ?
+            ''', (role_name,))
+        rows = await cursor.fetchall()
+        return rows
