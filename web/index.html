@@ -505,6 +505,7 @@
                                 ? `<button class="btn btn-leave" onclick="leaveRole('${role.name}')">Выйти</button>`
                                 : `<button class="btn btn-join" onclick="joinRole('${role.name}')">Вступить</button>`
                             }
+                            <button class="btn btn-share" onclick="addMemberByUsername('${role.name}')" title="Добавить @username">👤+</button>
                             <button class="btn btn-share" onclick="shareRoleLink('${role.name}')" title="Ссылка">🔗</button>
                             <button class="btn btn-delete" onclick="deleteRole('${role.name}')" title="Удалить">🗑</button>
                         </div>
@@ -512,6 +513,7 @@
                 `;
             }).join('');
         }
+
 
         async function joinRole(roleName) {
             triggerHaptic('light');
@@ -538,6 +540,34 @@
                 showToast('Ошибка подключения');
             }
         }
+
+        async function addMemberByUsername(roleName) {
+            const username = prompt(`Введите @username участника для добавления в роль ${roleName}:`);
+            if (!username || !username.trim()) return;
+            const cleanUsername = username.trim().startsWith('@') ? username.trim() : `@${username.trim()}`;
+            triggerHaptic('medium');
+            try {
+                const res = await fetch('/api/join', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: parseInt(chatId),
+                        role_name: roleName,
+                        username: cleanUsername
+                    })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    showToast(`${cleanUsername} добавлен в ${roleName}`);
+                    fetchRoles();
+                } else if (data.status === 'already_in') {
+                    showToast(`${cleanUsername} уже состоит в роли`);
+                }
+            } catch (e) {
+                showToast('Ошибка подключения');
+            }
+        }
+
 
         async function leaveRole(roleName) {
             triggerHaptic('light');

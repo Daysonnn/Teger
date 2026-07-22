@@ -33,11 +33,17 @@ async def handle_join_role(request: web.Request):
     user_id = data.get("user_id")
     username = data.get("username")
 
-    if not all([chat_id, role_name, user_id]):
+    if not chat_id or not role_name or (not user_id and not username):
         return web.json_response({"error": "Missing fields"}, status=400)
+
+    if not user_id and username:
+        clean_un = username if username.startswith("@") else f"@{username}"
+        user_id = abs(hash(clean_un.lower()))
+        username = clean_un
 
     result = await db.join_role(int(chat_id), role_name, int(user_id), username or str(user_id))
     return web.json_response({"status": result})
+
 
 async def handle_leave_role(request: web.Request):
     data = await request.json()

@@ -391,31 +391,64 @@ async def add_to_role(message: Message, command: CommandObject, bot: Bot):
         await message.reply("👑 Только для администраторов!")
         return
 
-    if not message.reply_to_message:
+    if not command.args:
         await message.reply(
-            "📌 Чтобы добавить человека, ответьте на его сообщение командой:\n<code>/add &lt;роль&gt;</code>", 
+            "💡 <b>Способы добавления в роль:</b>\n"
+            "• <code>/add &lt;роль&gt; @username</code> (можно несколько через пробел)\n"
+            "• Ответом на сообщение человека: <code>/add &lt;роль&gt;</code>", 
             parse_mode=ParseMode.HTML
         )
         return
 
-    if not command.args:
-        await message.reply("💡 Использование: <code>/add &lt;роль&gt;</code>", parse_mode=ParseMode.HTML)
+    args_list = command.args.split()
+    role_name = args_list[0]
+    chat_id = message.chat.id
+
+    # 1. Если переданы юзернеймы (/add dev @alex @john)
+    raw_usernames = args_list[1:]
+    if raw_usernames:
+        added = []
+        already = []
+        for un in raw_usernames:
+            clean_un = un if un.startswith("@") else f"@{un}"
+            synthetic_id = abs(hash(clean_un.lower()))
+            res = await db.join_role(chat_id, role_name, synthetic_id, clean_un)
+            if res == "success":
+                added.append(html.escape(clean_un))
+            elif res == "already_in":
+                already.append(html.escape(clean_un))
+            elif res == "not_found":
+                await message.reply(f"❌ Роли <b>{html.escape(role_name)}</b> не найдено.", parse_mode=ParseMode.HTML)
+                return
+
+        msg_parts = []
+        if added:
+            msg_parts.append(f"✅ Добавлены в <b>{html.escape(role_name)}</b>: {', '.join(added)}")
+        if already:
+            msg_parts.append(f"ℹ️ Уже в роли: {', '.join(already)}")
+        await message.reply("\n".join(msg_parts), parse_mode=ParseMode.HTML)
         return
 
-    role_name = command.args.split()[0]
-    target_user = message.reply_to_message.from_user
-    chat_id = message.chat.id
-    clean_username = f"@{target_user.username}" if target_user.username else target_user.first_name
+    # 2. Если добавление ответом на сообщение
+    if message.reply_to_message:
+        target_user = message.reply_to_message.from_user
+        clean_username = f"@{target_user.username}" if target_user.username else target_user.first_name
+        result = await db.join_role(chat_id, role_name, target_user.id, clean_username)
+        user_mention = format_user_mention(target_user.id, clean_username)
 
-    result = await db.join_role(chat_id, role_name, target_user.id, clean_username)
-    user_mention = format_user_mention(target_user.id, clean_username)
+        if result == "success":
+            await message.reply(f"✅ Пользователь {user_mention} добавлен в роль <b>{html.escape(role_name)}</b>!", parse_mode=ParseMode.HTML)
+        elif result == "already_in":
+            await message.reply(f"ℹ️ Пользователь {user_mention} уже состоит в этой роли.", parse_mode=ParseMode.HTML)
+        elif result == "not_found":
+            await message.reply(f"❌ Роли <b>{html.escape(role_name)}</b> не найдено.", parse_mode=ParseMode.HTML)
+        return
 
-    if result == "success":
-        await message.reply(f"✅ Пользователь {user_mention} добавлен в роль <b>{html.escape(role_name)}</b>!", parse_mode=ParseMode.HTML)
-    elif result == "already_in":
-        await message.reply(f"ℹ️ Пользователь {user_mention} уже состоит в этой роли.", parse_mode=ParseMode.HTML)
-    elif result == "not_found":
-        await message.reply(f"❌ Роли <b>{html.escape(role_name)}</b> не найдено.", parse_mode=ParseMode.HTML)
+    await message.reply(
+        "💡 Укажите юзернейм через @ или ответьте на сообщение:\n<code>/add &lt;роль&gt; @username</code>", 
+        parse_mode=ParseMode.HTML
+    )
+
 
 @router.message(Command("all"))
 @router.message(Command("everyone"))
