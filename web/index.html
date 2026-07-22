@@ -847,10 +847,13 @@
         function shareRoleLink(roleName) {
             triggerHaptic('medium');
             const botUsername = "tegerrbot";
-            const shareUrl = `https://t.me/${botUsername}?start=join_${roleName}`;
+            const shareUrl = chatId 
+                ? `https://t.me/${botUsername}?start=join_${roleName}_${chatId}`
+                : `https://t.me/${botUsername}?start=join_${roleName}`;
             navigator.clipboard.writeText(shareUrl);
             showToast(`🔗 Ссылка на роль ${roleName} скопирована!`);
         }
+
 
         async function createNewRole() {
             const input = document.getElementById('new-role-input');

@@ -103,23 +103,40 @@ async def start_cmd(message: Message, command: CommandObject):
     chat_id = message.chat.id
     is_priv = (message.chat.type == ChatType.PRIVATE)
     
-    # Диплинк для моментального вступления
+    # Диплинк для моментального вступления: join_roleName_chatId или join_roleName
     if command.args and command.args.startswith("join_"):
-        role_name = command.args[5:]
-        if not is_priv:
-            user = message.from_user
-            username = f"@{user.username}" if user.username else user.first_name
-            res = await db.join_role(chat_id, role_name, user.id, username)
-            if res == "success":
-                await message.reply(f"🎉 Вы вступили в роль 🛡️ <b>{html.escape(role_name)}</b>!", parse_mode=ParseMode.HTML)
-                return
-            elif res == "already_in":
-                await message.reply(f"ℹ️ Вы уже состоите в роли <b>{html.escape(role_name)}</b>.", parse_mode=ParseMode.HTML)
-                return
+        role_raw = command.args[5:]
+        target_chat_id = chat_id
+        
+        if "_" in role_raw:
+            parts = role_raw.rsplit("_", 1)
+            possible_role = parts[0]
+            try:
+                target_chat_id = int(parts[1])
+                role_name = possible_role
+            except ValueError:
+                role_name = role_raw
+        else:
+            role_name = role_raw
+
+        user = message.from_user
+        username = f"@{user.username}" if user.username else user.first_name
+        res = await db.join_role(target_chat_id, role_name, user.id, username)
+        
+        if res == "success":
+            await message.reply(f"🎉 Вы вступили в роль 🛡️ <b>{html.escape(role_name)}</b>!", parse_mode=ParseMode.HTML)
+            return
+        elif res == "already_in":
+            await message.reply(f"ℹ️ Вы уже состоите в роли <b>{html.escape(role_name)}</b>.", parse_mode=ParseMode.HTML)
+            return
+        elif res == "not_found":
+            await message.reply(f"❌ Роль <b>{html.escape(role_name)}</b> не найдена в этой группе.", parse_mode=ParseMode.HTML)
+            return
 
     text = await build_menu_text(chat_id)
     keyboard = get_main_menu_keyboard(chat_id, is_private=is_priv)
     await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
 
 @router.message(Command("help"))
 @router.message(Command("menu"))
