@@ -39,6 +39,7 @@ async def setup_commands(bot: Bot):
     commands = [
         BotCommand(command="menu", description="Панель управления ролями"),
         BotCommand(command="all", description="📢 Позвать всех участников чата"),
+        BotCommand(command="notify", description="🚨 (Админ) Срочное уведомление роли"),
         BotCommand(command="help", description="Справка"),
         BotCommand(command="list", description="Список ролей"),
         BotCommand(command="join", description="Вступить в роль"),
@@ -47,6 +48,7 @@ async def setup_commands(bot: Bot):
         BotCommand(command="delete", description="(Админ) Удалить роль"),
     ]
     await bot.set_my_commands(commands)
+
 
 
     webapp_url = os.getenv("WEBAPP_URL")

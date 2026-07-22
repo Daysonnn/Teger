@@ -401,6 +401,43 @@ async def list_roles(message: Message):
 
     await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
+@router.message(Command("notify"))
+async def notify_role(message: Message, command: CommandObject, bot: Bot):
+    if not await is_group(message): return
+    if not await check_admin(bot, message):
+        await message.reply("👑 Только для администраторов!")
+        return
+
+    if not command.args or len(command.args.split()) < 2:
+        await message.reply("💡 Использование: <code>/notify &lt;роль&gt; &lt;текст уведомления&gt;</code>", parse_mode=ParseMode.HTML)
+        return
+
+    parts = command.args.split(maxsplit=1)
+    role_name = parts[0]
+    notice_text = parts[1]
+    chat_id = message.chat.id
+
+    emoji = await db.get_role_emoji(chat_id, role_name)
+    members = await db.get_role_members(chat_id, role_name)
+
+    if not members:
+        await message.reply(f"❌ В роли {emoji} <b>{html.escape(role_name)}</b> пока нет участников или она не существует.", parse_mode=ParseMode.HTML)
+        return
+
+    mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
+    mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
+    keyboard = get_main_menu_keyboard(chat_id)
+
+    text = (
+        f"🚨 <b>СРОЧНОЕ УВЕДОМЛЕНИЕ ДЛЯ {emoji} {html.escape(role_name)}!</b> ({len(members)} чел.)\n\n"
+        f"<blockquote>📢 <i>«{html.escape(notice_text)}»</i></blockquote>\n\n"
+        f"<blockquote expandable>{mentions_str}</blockquote>"
+    )
+    await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+    
+    sender_un = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
+    await db.add_audit_log(chat_id, message.from_user.id, sender_un, "Уведомление роли", f"Роль: {role_name}")
+
 @router.message(Command("add"))
 async def add_to_role(message: Message, command: CommandObject, bot: Bot):
     if not await is_group(message): return
@@ -420,6 +457,7 @@ async def add_to_role(message: Message, command: CommandObject, bot: Bot):
     args_list = command.args.split()
     role_name = args_list[0]
     chat_id = message.chat.id
+    sender_un = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
 
     # 1. Если переданы юзернеймы (/add dev @alex @john)
     raw_usernames = args_list[1:]
@@ -432,6 +470,7 @@ async def add_to_role(message: Message, command: CommandObject, bot: Bot):
             res = await db.join_role(chat_id, role_name, synthetic_id, clean_un)
             if res == "success":
                 added.append(html.escape(clean_un))
+                await db.add_audit_log(chat_id, message.from_user.id, sender_un, "Добавление в роль", f"{clean_un} -> {role_name}")
             elif res == "already_in":
                 already.append(html.escape(clean_un))
             elif res == "not_found":
@@ -454,6 +493,7 @@ async def add_to_role(message: Message, command: CommandObject, bot: Bot):
         user_mention = format_user_mention(target_user.id, clean_username)
 
         if result == "success":
+            await db.add_audit_log(chat_id, message.from_user.id, sender_un, "Добавление в роль", f"{clean_username} -> {role_name}")
             await message.reply(f"✅ Пользователь {user_mention} добавлен в роль <b>{html.escape(role_name)}</b>!", parse_mode=ParseMode.HTML)
         elif result == "already_in":
             await message.reply(f"ℹ️ Пользователь {user_mention} уже состоит в этой роли.", parse_mode=ParseMode.HTML)
@@ -465,6 +505,7 @@ async def add_to_role(message: Message, command: CommandObject, bot: Bot):
         "💡 Укажите юзернейм через @ или ответьте на сообщение:\n<code>/add &lt;роль&gt; @username</code>", 
         parse_mode=ParseMode.HTML
     )
+
 
 
 @router.message(Command("all"))

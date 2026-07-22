@@ -33,7 +33,6 @@
             padding-bottom: 90px;
         }
 
-        /* Шапка */
         .app-header {
             margin-bottom: 16px;
         }
@@ -58,18 +57,20 @@
             border-radius: 10px;
             margin-bottom: 16px;
             border: 1px solid var(--border-color);
+            overflow-x: auto;
         }
 
         .tab-btn {
             flex: 1;
-            padding: 8px 12px;
+            padding: 8px 10px;
             border-radius: 8px;
             border: none;
             background: transparent;
             color: var(--hint-color);
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
             cursor: pointer;
+            white-space: nowrap;
             transition: all 0.2s ease;
         }
 
@@ -105,7 +106,6 @@
             color: var(--hint-color);
         }
 
-        /* Табы и карточки ролей */
         .tab-content {
             display: none;
         }
@@ -143,16 +143,15 @@
         }
 
         .role-icon {
-            width: 36px;
-            height: 36px;
+            width: 38px;
+            height: 38px;
             border-radius: 10px;
-            background: var(--button-color);
-            color: var(--button-text-color);
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 16px;
-            font-weight: 700;
+            font-size: 20px;
         }
 
         .role-name {
@@ -254,6 +253,36 @@
             padding: 10px 12px;
         }
 
+        /* Выбор Эмодзи для Роли */
+        .emoji-picker {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 14px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+        }
+
+        .emoji-option {
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: transform 0.15s ease;
+        }
+
+        .emoji-option.selected {
+            border-color: var(--button-color);
+            background: rgba(0, 122, 255, 0.12);
+            transform: scale(1.1);
+        }
+
         /* Карточка создания роли */
         .create-card {
             background: var(--secondary-bg-color);
@@ -284,7 +313,7 @@
             outline: none;
         }
 
-        /* Статистика */
+        /* Статистика & Лог */
         .stats-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -314,16 +343,16 @@
             text-transform: uppercase;
         }
 
-        /* Состав чата (Админка ростера) */
         .roster-card {
             background: var(--secondary-bg-color);
             border-radius: 14px;
             padding: 16px;
             border: 1px solid var(--border-color);
+            margin-bottom: 16px;
         }
 
         .roster-card h3 {
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 600;
             color: var(--hint-color);
             text-transform: uppercase;
@@ -364,6 +393,36 @@
             padding: 2px 6px;
             border-radius: 6px;
             color: var(--hint-color);
+        }
+
+        /* Элементы Лога */
+        .log-item {
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 13px;
+        }
+
+        .log-item:last-child {
+            border-bottom: none;
+        }
+
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            font-weight: 600;
+            color: var(--text-color);
+        }
+
+        .log-time {
+            font-size: 11px;
+            color: var(--hint-color);
+            font-weight: 400;
+        }
+
+        .log-details {
+            font-size: 12px;
+            color: var(--hint-color);
+            margin-top: 2px;
         }
 
         /* Модальное окно выбора участников */
@@ -428,7 +487,7 @@
 
         .modal-scroll {
             overflow-y: auto;
-            max-height: 55vh;
+            max-height: 50vh;
             display: flex;
             flex-direction: column;
             gap: 8px;
@@ -482,7 +541,8 @@
     <div class="tabs-nav">
         <button class="tab-btn active" onclick="switchTab('roles', this)">🛡️ Роли</button>
         <button class="tab-btn" onclick="switchTab('create', this)">➕ Создать</button>
-        <button class="tab-btn" onclick="switchTab('stats', this)">📊 Участники</button>
+        <button class="tab-btn" onclick="switchTab('stats', this)">📊 Состав</button>
+        <button class="tab-btn" onclick="switchTab('logs', this)">📜 История</button>
     </div>
 
     <!-- ТАБ 1: Список ролей -->
@@ -496,10 +556,22 @@
         </div>
     </div>
 
-    <!-- ТАБ 2: Создание роли -->
+    <!-- ТАБ 2: Создание роли с выбором Эмодзи -->
     <div id="tab-create" class="tab-content">
         <div class="create-card">
             <h2>Создание новой роли</h2>
+            <div class="emoji-picker" id="emoji-picker">
+                <div class="emoji-option selected" onclick="selectEmoji(this, '🛡️')">🛡️</div>
+                <div class="emoji-option" onclick="selectEmoji(this, '💻')">💻</div>
+                <div class="emoji-option" onclick="selectEmoji(this, '🎨')">🎨</div>
+                <div class="emoji-option" onclick="selectEmoji(this, '🎮')">🎮</div>
+                <div class="emoji-option" onclick="selectEmoji(this, '⚡')">⚡</div>
+                <div class="emoji-option" onclick="selectEmoji(this, '🚀')">🚀</div>
+                <div class="emoji-option" onclick="selectEmoji(this, '👑')">👑</div>
+                <div class="emoji-option" onclick="selectEmoji(this, '🔥')">🔥</div>
+                <div class="emoji-option" onclick="selectEmoji(this, '🎯')">🎯</div>
+            </div>
+
             <div class="form-row">
                 <input type="text" id="new-role-input" class="create-input" placeholder="Название роли (например: dev)">
                 <button class="btn btn-join" style="flex: initial;" onclick="createNewRole()">Создать</button>
@@ -524,6 +596,16 @@
             <h3>Участники группы и их роли</h3>
             <div id="roster-list">
                 <div class="loader">Загрузка состава...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ТАБ 4: История изменений (Audit Log) -->
+    <div id="tab-logs" class="tab-content">
+        <div class="roster-card">
+            <h3>📜 История изменений чата</h3>
+            <div id="logs-list">
+                <div class="loader">Загрузка истории...</div>
             </div>
         </div>
     </div>
@@ -565,6 +647,7 @@
         let allRolesCache = [];
         let chatMembersCache = [];
         let activeModalRole = null;
+        let selectedRoleEmoji = '🛡️';
 
         document.getElementById('chat-info').textContent = chatId 
             ? `Группа ID: ${chatId}` 
@@ -583,6 +666,13 @@
             setTimeout(() => { toast.classList.remove('visible'); }, 2000);
         }
 
+        function selectEmoji(el, emoji) {
+            triggerHaptic('light');
+            document.querySelectorAll('.emoji-option').forEach(e => e.classList.remove('selected'));
+            el.classList.add('selected');
+            selectedRoleEmoji = emoji;
+        }
+
         function switchTab(tabName, btnElement) {
             triggerHaptic('light');
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
@@ -595,6 +685,8 @@
 
             if (tabName === 'stats') {
                 fetchChatMembers();
+            } else if (tabName === 'logs') {
+                fetchAuditLogs();
             }
         }
 
@@ -640,6 +732,35 @@
             }
         }
 
+        async function fetchAuditLogs() {
+            if (!chatId) return;
+            try {
+                const res = await fetch(`/api/audit_logs?chat_id=${chatId}`);
+                const data = await res.json();
+                renderAuditLogs(data.logs || []);
+            } catch (e) {
+                console.error("Ошибка истории:", e);
+            }
+        }
+
+        function renderAuditLogs(logs) {
+            const container = document.getElementById('logs-list');
+            if (logs.length === 0) {
+                container.innerHTML = `<div class="loader">История пока пуста</div>`;
+                return;
+            }
+
+            container.innerHTML = logs.map(l => `
+                <div class="log-item">
+                    <div class="log-header">
+                        <span>${escapeHtml(l.username)} ➔ ${escapeHtml(l.action)}</span>
+                        <span class="log-time">${escapeHtml(l.time)}</span>
+                    </div>
+                    <div class="log-details">${escapeHtml(l.details || '')}</div>
+                </div>
+            `).join('');
+        }
+
         function renderRoster(members) {
             const container = document.getElementById('roster-list');
             if (members.length === 0) {
@@ -676,7 +797,7 @@
 
             container.innerHTML = roles.map(role => {
                 const isMember = role.members.some(m => m.user_id === currentUser.id);
-                const letter = role.name.charAt(0).toUpperCase();
+                const roleIcon = role.emoji || '🛡️';
 
                 const membersHtml = role.members.length > 0 
                     ? role.members.map(m => {
@@ -691,7 +812,7 @@
                     <div class="role-card">
                         <div class="role-header">
                             <div class="role-title">
-                                <div class="role-icon">${letter}</div>
+                                <div class="role-icon">${roleIcon}</div>
                                 <div class="role-name">${escapeHtml(role.name)}</div>
                             </div>
                             <span class="count-pill">${role.members.length} чел.</span>
@@ -854,7 +975,6 @@
             showToast(`🔗 Ссылка на роль ${roleName} скопирована!`);
         }
 
-
         async function createNewRole() {
             const input = document.getElementById('new-role-input');
             const roleName = input.value.trim();
@@ -867,12 +987,13 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         chat_id: parseInt(chatId),
-                        role_name: roleName
+                        role_name: roleName,
+                        emoji: selectedRoleEmoji
                     })
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
-                    showToast(`Роль ${roleName} создана`);
+                    showToast(`Роль ${selectedRoleEmoji} ${roleName} создана`);
                     input.value = '';
                     switchTab('roles');
                     fetchRoles();

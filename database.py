@@ -13,9 +13,16 @@ async def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 chat_id INTEGER NOT NULL,
                 name TEXT NOT NULL COLLATE NOCASE,
+                emoji TEXT DEFAULT '🛡️',
                 UNIQUE(chat_id, name)
             )
         ''')
+
+        # Добавляем колонку emoji если её ещё нет в существующей БД
+        try:
+            await conn.execute("ALTER TABLE roles ADD COLUMN emoji TEXT DEFAULT '🛡️';")
+        except Exception:
+            pass
         
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS members (
@@ -35,6 +42,19 @@ async def init_db():
                 PRIMARY KEY(chat_id, user_id)
             )
         ''')
+
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER,
+                username TEXT,
+                action TEXT NOT NULL,
+                details TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
         await conn.commit()
     _db_initialized = True
 
@@ -62,6 +82,34 @@ async def record_chat_user(chat_id: int, user_id: int, username: str):
     except Exception:
         pass
 
+async def add_audit_log(chat_id: int, user_id: int | None, username: str | None, action: str, details: str = ""):
+    """Записывает действие в лог аудита чата."""
+    try:
+        async with get_db() as conn:
+            await conn.execute('''
+                INSERT INTO audit_logs (chat_id, user_id, username, action, details)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (chat_id, user_id, username, action, details))
+            await conn.commit()
+    except Exception:
+        pass
+
+async def get_audit_logs(chat_id: int, limit: int = 20) -> list[dict]:
+    """Возвращает историю действий чата."""
+    async with get_db() as conn:
+        cursor = await conn.execute('''
+            SELECT username, action, details, strftime('%H:%M %d.%m', created_at)
+            FROM audit_logs
+            WHERE chat_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+        ''', (chat_id, limit))
+        rows = await cursor.fetchall()
+        return [
+            {"username": r[0] or "Система", "action": r[1], "details": r[2], "time": r[3]}
+            for r in rows
+        ]
+
 async def get_all_chat_users(chat_id: int) -> list[tuple[int, str]]:
     """Возвращает всех известных участников чата (из базы чата и ролей)."""
     async with get_db() as conn:
@@ -75,10 +123,10 @@ async def get_all_chat_users(chat_id: int) -> list[tuple[int, str]]:
         rows = await cursor.fetchall()
         return rows
 
-async def create_role(chat_id: int, role_name: str) -> bool:
+async def create_role(chat_id: int, role_name: str, emoji: str = "🛡️") -> bool:
     try:
         async with get_db() as conn:
-            await conn.execute('INSERT INTO roles (chat_id, name) VALUES (?, ?)', (chat_id, role_name))
+            await conn.execute('INSERT INTO roles (chat_id, name, emoji) VALUES (?, ?, ?)', (chat_id, role_name, emoji))
             await conn.commit()
             return True
     except aiosqlite.IntegrityError:
@@ -126,6 +174,20 @@ async def get_all_roles(chat_id: int) -> list[str]:
         cursor = await conn.execute('SELECT name FROM roles WHERE chat_id = ?', (chat_id,))
         rows = await cursor.fetchall()
         return [row[0] for row in rows]
+
+async def get_all_roles_with_details(chat_id: int) -> list[dict]:
+    """Возвращает роли с эмодзи."""
+    async with get_db() as conn:
+        cursor = await conn.execute('SELECT name, COALESCE(emoji, "🛡️") FROM roles WHERE chat_id = ?', (chat_id,))
+        rows = await cursor.fetchall()
+        return [{"name": r[0], "emoji": r[1]} for r in rows]
+
+async def get_role_emoji(chat_id: int, role_name: str) -> str:
+    """Возвращает эмодзи роли."""
+    async with get_db() as conn:
+        cursor = await conn.execute('SELECT COALESCE(emoji, "🛡️") FROM roles WHERE chat_id = ? AND name = ?', (chat_id, role_name))
+        row = await cursor.fetchone()
+        return row[0] if row else "🛡️"
 
 async def get_role_members(chat_id: int, role_name: str) -> list[tuple[int, str]]:
     async with get_db() as conn:
