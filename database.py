@@ -225,9 +225,10 @@ async def get_global_roles_with_details() -> list[dict]:
     """Возвращает все уникальные роли для показа в инлайн-подсказках."""
     async with get_db() as conn:
         cursor = await conn.execute('''
-            SELECT DISTINCT r.name, COALESCE(r.emoji, "🛡️")
+            SELECT DISTINCT r.name, COALESCE(r.emoji, '🛡️')
             FROM roles r
         ''')
+
         rows = await cursor.fetchall()
         result = []
         for r_name, r_emoji in rows:

@@ -245,7 +245,9 @@ async def cb_help_unified(query: CallbackQuery):
 
 @router.inline_query()
 async def inline_query_handler(query: InlineQuery):
-    query_text = query.query.strip().lower()
+    try:
+        query_text = query.query.strip().lower()
+
     
     webapp_url = os.getenv("WEBAPP_URL")
     if webapp_url:
@@ -345,6 +347,21 @@ async def inline_query_handler(query: InlineQuery):
 
     # Устанавливаем cache_time=0 и is_personal=True, чтобы Telegram мгновенно выводил весь список при вводе пробела!
     await query.answer(results[:50], cache_time=0, is_personal=True)
+except Exception as e:
+    print(f"Inline error: {e}")
+    fallback = [
+        InlineQueryResultArticle(
+            id="prompt_fallback",
+            title="📢 Призыв роли",
+            description="Введите название роли (например: dev или all)",
+            input_message_content=InputTextMessageContent(
+                message_text="💡 Введите название роли после <code>@tegerrbot</code> для призыва.",
+                parse_mode=ParseMode.HTML
+            )
+        )
+    ]
+    await query.answer(fallback, cache_time=0, is_personal=True)
+
 
 
 
