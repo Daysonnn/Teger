@@ -2,4 +2,5 @@ aiogram>=3.4.0
 aiosqlite>=0.20.0
 aiohttp-socks>=0.8.4
 python-dotenv
+cachetools>=5.0.0
 

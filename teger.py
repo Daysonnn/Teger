@@ -90,6 +90,9 @@ async def main():
     dp = Dispatcher()
     dp.include_router(handlers.router)
 
+    # Собираем список зарегистрированных команд для dynamic_role_call
+    handlers._collect_known_commands()
+
     await setup_commands(bot)
     
     try:

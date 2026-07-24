@@ -1,5 +1,6 @@
 import os
 import html
+import time
 from aiogram import Router, F, Bot
 from aiogram.enums import ChatType, ParseMode
 from aiogram.filters import CommandObject, Command, CommandStart
@@ -7,8 +8,12 @@ from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo,
     InlineQuery, InlineQueryResultArticle, InputTextMessageContent
 )
+from cachetools import TTLCache
 
 import database as db
+
+# Кэш результатов check_admin: ключ (chat_id, user_id) → True/False, 60 сек
+_admin_cache: TTLCache = TTLCache(maxsize=512, ttl=60)
 
 router = Router()
 
@@ -79,8 +84,14 @@ async def is_group(message: Message) -> bool:
     return True
 
 async def check_admin(bot: Bot, message: Message) -> bool:
+    key = (message.chat.id, message.from_user.id)
+    cached = _admin_cache.get(key)
+    if cached is not None:
+        return cached
     member = await bot.get_chat_member(chat_id=message.chat.id, user_id=message.from_user.id)
-    return member.status in ['administrator', 'creator']
+    result = member.status in ['administrator', 'creator']
+    _admin_cache[key] = result
+    return result
 
 async def build_menu_text(chat_id: int) -> str:
     roles = await db.get_all_roles(chat_id)
@@ -632,6 +643,27 @@ async def call_all_members(message: Message):
     # Чистое независимое сообщение
     await message.reply(text, parse_mode=ParseMode.HTML)
 
+# Набор имён команд, зарегистрированных в роутере — строится один раз при старте.
+# Так dynamic_role_call никогда не обрабатывает «свои» команды.
+KNOWN_COMMANDS: set[str] = set()
+
+def _collect_known_commands() -> None:
+    """Собирает все команды, зарегистрированные в router, в KNOWN_COMMANDS."""
+    for handler in router.message.handlers:
+        for flt in getattr(handler, 'filters', []):
+            # aiogram хранит фильтр как экземпляр Command / CommandStart
+            obj = flt.callback if hasattr(flt, 'callback') else flt
+            if isinstance(obj, (Command, CommandStart)):
+                cmds = getattr(obj, 'commands', [])
+                for cmd in cmds:
+                    name = cmd.command if hasattr(cmd, 'command') else str(cmd)
+                    KNOWN_COMMANDS.add(name.lower())
+
+    # Запасной хардкод — сработает, если рефлексия ничего не нашла
+    fallback = {"start", "help", "menu", "create", "delete", "join", "leave", "list", "add", "all", "everyone", "notify"}
+    KNOWN_COMMANDS.update(fallback)
+
+
 @router.message(F.text.startswith("/"))
 async def dynamic_role_call(message: Message):
     if message.chat.type == ChatType.PRIVATE:
@@ -643,9 +675,10 @@ async def dynamic_role_call(message: Message):
         await db.record_chat_user(message.chat.id, user.id, uname)
 
     raw_cmd = message.text[1:].split()[0]
-    command_text = raw_cmd.split('@')[0]
-    
-    if command_text in ["start", "help", "menu", "create", "delete", "join", "leave", "list", "add", "all", "everyone", "notify"]:
+    command_text = raw_cmd.split('@')[0].lower()
+
+    # Если команда совпадает с уже зарегистрированным хендлером — не трогаем
+    if command_text in KNOWN_COMMANDS:
         return
 
     chat_id = message.chat.id
@@ -655,12 +688,11 @@ async def dynamic_role_call(message: Message):
     if members:
         mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
         mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
-        
+
         text = (
             f"📢 <b>Призыв участников {emoji} {html.escape(command_text)}!</b> ({len(members)} чел.)\n\n"
             f"<blockquote expandable>{mentions_str}</blockquote>"
         )
-        # Чистое независимое сообщение
         await message.reply(text, parse_mode=ParseMode.HTML)
 
 
