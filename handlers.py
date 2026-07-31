@@ -512,19 +512,24 @@ async def list_roles(message: Message):
 
 @router.message(Command("send"))
 async def send_custom_msg(message: Message, command: CommandObject, bot: Bot):
-    # Разрешаем только владельцу бота (из OWNER_ID в .env)
+    # Разрешаем владельцу бота (из OWNER_ID в .env)
     owner_id_env = os.getenv("OWNER_ID")
     is_owner = False
     if owner_id_env:
         try:
-            is_owner = (message.from_user.id == int(owner_id_env))
+            is_owner = (message.from_user.id == int(owner_id_env.strip()))
         except ValueError:
             pass
 
-    # Если OWNER_ID не задан в .env — проверяем права админа в группе
+    # Если не владелец — проверяем права админа в группе
     if not is_owner:
         if message.chat.type == ChatType.PRIVATE or not await check_admin(bot, message):
-            await message.reply("⛔ У вас нет доступа к этой команде.")
+            await message.reply(
+                f"⛔ У вас нет доступа к этой команде.\n\n"
+                f"💡 <b>Ваш User ID:</b> <code>{message.from_user.id}</code>\n"
+                f"💡 <b>OWNER_ID в .env:</b> <code>{owner_id_env or 'не задан'}</code>",
+                parse_mode=ParseMode.HTML
+            )
             return
 
     if not command.args or len(command.args.split()) < 2:
