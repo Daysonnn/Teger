@@ -162,27 +162,16 @@
             border-radius: 16px;
             padding: 4px;
             display: flex;
-            gap: 4px;
+            gap: 3px;
             margin-bottom: 18px;
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
+            width: 100%;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-            -ms-overflow-style: none;
-            scrollbar-width: none;
-        }
-
-        .nav-pill-wrapper::-webkit-scrollbar,
-        .emoji-grid-select::-webkit-scrollbar,
-        .preset-chips::-webkit-scrollbar,
-        ::-webkit-scrollbar {
-            display: none !important;
-            width: 0 !important;
-            height: 0 !important;
         }
 
         .nav-item-btn {
-            flex: 1 1 auto;
-            padding: 8px 10px;
+            flex: 1 1 0px; /* Равномерное распределение 5 табов без вылезания */
+            min-width: 0;   /* Предотвращает раздувание кнопок */
+            padding: 8px 4px;
             border-radius: 12px;
             border: none;
             background: transparent;
@@ -191,12 +180,43 @@
             font-weight: 600;
             cursor: pointer;
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 4px;
             transition: background-color 0.2s ease, color 0.2s ease, transform 0.15s cubic-bezier(0.2, 0, 0, 1);
             min-height: 38px;
+        }
+
+        @media (max-width: 380px) {
+            .nav-item-btn {
+                font-size: 11px;
+                padding: 6px 2px;
+                gap: 2px;
+            }
+        }
+
+        /* Тонкие изящные скроллбары для горизонтальных списков на ПК */
+        .emoji-grid-select::-webkit-scrollbar,
+        .preset-chips::-webkit-scrollbar,
+        .modal-scroll-area::-webkit-scrollbar {
+            height: 4px;
+            width: 4px;
+        }
+
+        .emoji-grid-select::-webkit-scrollbar-track,
+        .preset-chips::-webkit-scrollbar-track,
+        .modal-scroll-area::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .emoji-grid-select::-webkit-scrollbar-thumb,
+        .preset-chips::-webkit-scrollbar-thumb,
+        .modal-scroll-area::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
         }
 
         .nav-item-btn:active {
@@ -1418,6 +1438,16 @@
         function escapeHtml(text) {
             return (text || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         }
+
+        // Поддержка прокрутки горизонтальных списков колёсиком мыши на ПК
+        document.querySelectorAll('.emoji-grid-select, .preset-chips').forEach(container => {
+            container.addEventListener('wheel', (e) => {
+                if (e.deltaY !== 0) {
+                    e.preventDefault();
+                    container.scrollLeft += e.deltaY;
+                }
+            }, { passive: false });
+        });
 
         // Запуск
         checkOwnerStatus();
