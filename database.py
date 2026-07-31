@@ -321,3 +321,18 @@ async def get_global_roles_with_details() -> list[dict]:
             count = count_row[0] if count_row else 0
             result.append({"name": r_name, "emoji": r_emoji, "count": count})
         return result
+
+async def get_all_chat_ids() -> list[int]:
+    """Возвращает список всех известных уникальных chat_id из базы."""
+    async with get_db() as conn:
+        cursor = await conn.execute('''
+            SELECT DISTINCT chat_id FROM (
+                SELECT chat_id FROM roles
+                UNION
+                SELECT chat_id FROM chat_users
+                UNION
+                SELECT chat_id FROM audit_logs
+            ) WHERE chat_id IS NOT NULL AND chat_id != 0
+        ''')
+        rows = await cursor.fetchall()
+        return [r[0] for r in rows]

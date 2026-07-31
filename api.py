@@ -160,12 +160,13 @@ async def handle_admin_send(request: web.Request):
         user_id = data.get("user_id")
         target_chat_id = data.get("chat_id")
         message_text = data.get("message")
+        is_global = data.get("is_global", False)
 
         if not check_is_owner(user_id):
             return web.json_response({"error": "⛔ Доступ запрещен. Только для владельца бота."}, status=403)
 
-        if not target_chat_id or not message_text:
-            return web.json_response({"error": "Укажите Chat ID и текст сообщения"}, status=400)
+        if not message_text:
+            return web.json_response({"error": "Укажите текст сообщения"}, status=400)
 
         token = os.getenv("TOKEN")
         if not token:
@@ -173,10 +174,37 @@ async def handle_admin_send(request: web.Request):
 
         from aiogram import Bot
         bot = Bot(token=token)
-        await bot.send_message(chat_id=target_chat_id, text=message_text, parse_mode="HTML")
-        await bot.session.close()
-        
-        return web.json_response({"status": "success", "message": "Сообщение успешно отправлено в чат!"})
+
+        if is_global or str(target_chat_id or '').strip().lower() in ["all", "global", "*"]:
+            all_chats = await db.get_all_chat_ids()
+            if not all_chats:
+                await bot.session.close()
+                return web.json_response({"error": "В базе данных пока нет чатов для рассылки."}, status=404)
+
+            success_count = 0
+            fail_count = 0
+            for cid in all_chats:
+                try:
+                    await bot.send_message(chat_id=cid, text=message_text, parse_mode="HTML")
+                    success_count += 1
+                except Exception as ex:
+                    fail_count += 1
+                    logging.warning(f"Broadcast failed for {cid}: {ex}")
+
+            await bot.session.close()
+            return web.json_response({
+                "status": "success",
+                "message": f"📢 Массовая рассылка завершена!\nУспешно отправлено в {success_count} чатов (ошибок: {fail_count})."
+            })
+        else:
+            if not target_chat_id:
+                await bot.session.close()
+                return web.json_response({"error": "Укажите Chat ID чата"}, status=400)
+
+            await bot.send_message(chat_id=target_chat_id, text=message_text, parse_mode="HTML")
+            await bot.session.close()
+            return web.json_response({"status": "success", "message": "Сообщение успешно отправлено в чат!"})
+
     except Exception as e:
         logging.error(f"Error in admin send: {e}")
         return web.json_response({"error": f"Ошибка отправки: {str(e)}"}, status=500)

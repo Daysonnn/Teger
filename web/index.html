@@ -5,37 +5,45 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Teger — Ролевой Менеджер</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
     <style>
         :root {
-            /* Переменные темы с поддержкой OKLCH / Telegram Native */
-            --bg-primary: var(--tg-theme-bg-color, #ffffff);
-            --bg-secondary: var(--tg-theme-secondary-bg-color, #f4f4f7);
-            --bg-card: var(--tg-theme-secondary-bg-color, #ffffff);
-            --text-primary: var(--tg-theme-text-color, #1c1c1e);
-            --text-secondary: var(--tg-theme-hint-color, #8e8e93);
-            --accent: var(--tg-theme-button-color, #007aff);
-            --accent-text: var(--tg-theme-button-text-color, #ffffff);
-            --accent-light: rgba(0, 122, 255, 0.12);
-            --border-color: rgba(60, 60, 67, 0.12);
-            --danger-color: #ff3b30;
-            --danger-light: rgba(255, 59, 48, 0.12);
-            --success-color: #34c759;
-            --success-light: rgba(52, 199, 89, 0.12);
-            --radius-outer: 16px;
+            /* Дизайн вдохновлен стилистикой dayson.lol */
+            --bg-color: #0f1013;
+            --card-bg: rgba(30, 30, 36, 0.55);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --card-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            
+            --text-main: #f0f0f0;
+            --text-dim: #9aa0a6;
+            --accent-red: #e11d48;
+            --accent-red-glow: rgba(225, 29, 72, 0.25);
+            --accent-blue: #3b82f6;
+            --accent-blue-glow: rgba(59, 130, 246, 0.2);
+            --accent-gold: #f59e0b;
+            
+            --nav-bg: rgba(22, 22, 28, 0.7);
+            --nav-border: rgba(255, 255, 255, 0.08);
+            
+            --radius-outer: 18px;
             --radius-inner: 10px;
             --radius-btn: 12px;
-            --shadow-subtle: 0 4px 16px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
-            --shadow-card: 0 6px 20px rgba(0, 0, 0, 0.06);
         }
 
-        @media (prefers-color-scheme: dark) {
+        /* Светлая тема (при переключении пользователем в Telegram) */
+        @media (prefers-color-scheme: light) {
             :root {
-                --bg-primary: var(--tg-theme-bg-color, #1c1c1e);
-                --bg-secondary: var(--tg-theme-secondary-bg-color, #2c2c2e);
-                --bg-card: #2c2c2e;
-                --text-primary: var(--tg-theme-text-color, #f2f2f7);
-                --text-secondary: var(--tg-theme-hint-color, #98989d);
-                --border-color: rgba(255, 255, 255, 0.12);
+                --bg-color: #fcfcfe;
+                --card-bg: rgba(255, 255, 255, 0.85);
+                --card-border: rgba(0, 0, 0, 0.08);
+                --card-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+                --text-main: #141416;
+                --text-dim: #6e6e73;
+                --nav-bg: rgba(240, 240, 245, 0.8);
+                --nav-border: rgba(0, 0, 0, 0.08);
             }
         }
 
@@ -43,46 +51,104 @@
             box-sizing: border-box;
             margin: 0;
             padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: 'Golos Text', -apple-system, BlinkMacSystemFont, sans-serif;
             -webkit-tap-highlight-color: transparent;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
         }
 
         body {
-            background-color: var(--bg-primary);
-            color: var(--text-primary);
+            background-color: var(--bg-color);
+            color: var(--text-main);
             padding: 16px;
             padding-bottom: 100px;
             min-height: 100vh;
+            position: relative;
+            overflow-x: hidden;
         }
 
-        /* Заголовок */
-        .app-header {
+        /* Декоративные световые пятна (Аврора в стиле dayson.lol) */
+        .aurora-bg {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            z-index: 0;
+            overflow: hidden;
+        }
+
+        .aurora-blob {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.18;
+        }
+
+        .blob-1 {
+            width: 280px; height: 280px;
+            background: var(--accent-red);
+            top: -50px; left: -50px;
+        }
+
+        .blob-2 {
+            width: 320px; height: 320px;
+            background: var(--accent-blue);
+            bottom: 100px; right: -80px;
+        }
+
+        /* Контейнер приложения */
+        .app-wrapper {
+            position: relative;
+            z-index: 1;
+            max-width: 680px;
+            margin: 0 auto;
+        }
+
+        /* Шапка приложения */
+        .top-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 16px;
+            margin-bottom: 18px;
         }
 
-        .header-title h1 {
-            font-size: 22px;
-            font-weight: 700;
+        .brand-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .brand-logo {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, var(--accent-red), #991b1b);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 18px;
+            color: #ffffff;
+            box-shadow: 0 4px 14px var(--accent-red-glow);
+        }
+
+        .brand-text h1 {
+            font-size: 20px;
+            font-weight: 800;
             letter-spacing: -0.4px;
-            text-wrap: balance;
         }
 
-        .header-title p {
-            font-size: 13px;
-            color: var(--text-secondary);
-            margin-top: 2px;
+        .brand-text p {
+            font-size: 12px;
+            color: var(--text-dim);
             font-variant-numeric: tabular-nums;
         }
 
-        .user-badge {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            padding: 6px 12px;
+        .user-pill {
+            background: var(--nav-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--nav-border);
+            padding: 6px 14px;
             border-radius: 20px;
             font-size: 12px;
             font-weight: 600;
@@ -91,204 +157,242 @@
             gap: 6px;
         }
 
-        /* Табы (Segmented Control) */
-        .tabs-nav {
-            display: flex;
-            background: var(--bg-secondary);
+        /* Плавлющаяся навигация (Pill Nav в стиле dayson.lol) */
+        .nav-pill-wrapper {
+            background: var(--nav-bg);
+            backdrop-filter: blur(30px);
+            -webkit-backdrop-filter: blur(30px);
+            border: 1px solid var(--nav-border);
+            border-radius: 16px;
             padding: 4px;
-            border-radius: var(--radius-outer);
-            margin-bottom: 16px;
-            border: 1px solid var(--border-color);
-            overflow-x: auto;
+            display: flex;
             gap: 4px;
+            margin-bottom: 18px;
+            overflow-x: auto;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
         }
 
-        .tab-btn {
+        .nav-item-btn {
             flex: 1;
-            padding: 9px 12px;
-            border-radius: calc(var(--radius-outer) - 4px);
+            padding: 10px 14px;
+            border-radius: 12px;
             border: none;
             background: transparent;
-            color: var(--text-secondary);
+            color: var(--text-dim);
             font-size: 13px;
             font-weight: 600;
             cursor: pointer;
             white-space: nowrap;
-            transition: background-color 0.2s ease, color 0.2s ease, transform 0.15s cubic-bezier(0.2, 0, 0, 1);
-            min-height: 38px;
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 6px;
+            transition: background-color 0.2s ease, color 0.2s ease, transform 0.15s cubic-bezier(0.2, 0, 0, 1);
+            min-height: 40px;
         }
 
-        .tab-btn:active {
+        .nav-item-btn:active {
             transform: scale(0.96);
         }
 
-        .tab-btn.active {
-            background: var(--bg-primary);
-            color: var(--text-primary);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        .nav-item-btn.active {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-main);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
         }
 
-        .tab-btn.admin-tab {
-            color: #ff9500;
-            display: none; /* Покажется если OWNER */
+        @media (prefers-color-scheme: light) {
+            .nav-item-btn.active {
+                background: #ffffff;
+                color: #000000;
+            }
         }
-        .tab-btn.admin-tab.active {
-            background: rgba(255, 149, 0, 0.15);
-            color: #ff9500;
+
+        .nav-item-btn.admin-tab {
+            color: var(--accent-gold);
+            display: none; /* Отображается только для OWNER */
+        }
+        .nav-item-btn.admin-tab.active {
+            background: rgba(245, 158, 11, 0.18);
+            color: var(--accent-gold);
         }
 
         .tab-content {
             display: none;
-            animation: fadeIn 0.2s ease-out;
+            animation: cardFadeIn 0.25s cubic-bezier(0.2, 0, 0, 1);
         }
+        .tab-content.active { display: block; }
 
-        .tab-content.active {
-            display: block;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(4px); }
+        @keyframes cardFadeIn {
+            from { opacity: 0; transform: translateY(6px); }
             to { opacity: 1; transform: translateY(0); }
         }
 
-        /* Поиск */
-        .search-box {
+        /* Карточка в стиле dayson.lol (со строкой имя-файла в шапке) */
+        .glass-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(40px);
+            -webkit-backdrop-filter: blur(40px);
+            border: 1px solid var(--card-border);
+            box-shadow: var(--card-shadow);
+            border-radius: var(--radius-outer);
+            padding: 20px;
+            margin-bottom: 16px;
             position: relative;
+        }
+
+        .card-file-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--text-dim);
             margin-bottom: 14px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--card-border);
+        }
+
+        .card-file-header span.file-icon {
+            opacity: 0.7;
+        }
+
+        .card-title {
+            font-size: 17px;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+            margin-bottom: 14px;
+        }
+
+        /* Поиск */
+        .search-container {
+            position: relative;
+            margin-bottom: 16px;
         }
 
         .search-input {
             width: 100%;
-            padding: 12px 14px 12px 38px;
+            padding: 12px 14px 12px 40px;
             border-radius: var(--radius-btn);
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            color: var(--text-primary);
-            font-size: 16px; /* 16px предотвращает автозум на iOS */
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--card-border);
+            color: var(--text-main);
+            font-size: 16px; /* Предотвращение iOS zoom */
             outline: none;
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }
 
         .search-input:focus-visible {
-            border-color: var(--accent);
-            box-shadow: 0 0 0 3px var(--accent-light);
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 0 3px var(--accent-blue-glow);
         }
 
-        .search-icon {
+        .search-icon-inside {
             position: absolute;
-            left: 12px;
+            left: 14px;
             top: 50%;
             transform: translateY(-50%);
+            color: var(--text-dim);
             font-size: 15px;
-            color: var(--text-secondary);
         }
 
-        /* Карточка Роли */
-        .roles-container {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-
-        .role-card {
-            background: var(--bg-card);
-            border-radius: var(--radius-outer);
-            padding: 16px;
+        /* Сетка ролей */
+        .roles-list-container {
             display: flex;
             flex-direction: column;
             gap: 14px;
-            border: 1px solid var(--border-color);
-            box-shadow: var(--shadow-subtle);
         }
 
-        .role-header {
+        .role-item-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(30px);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-outer);
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .role-header-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
 
-        .role-title {
+        .role-identity {
             display: flex;
             align-items: center;
             gap: 12px;
         }
 
-        .role-icon {
-            width: 42px;
-            height: 42px;
+        .role-emoji-box {
+            width: 44px;
+            height: 44px;
             border-radius: var(--radius-inner);
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--card-border);
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 22px;
         }
 
-        .role-name {
-            font-size: 17px;
-            font-weight: 650;
+        .role-name-text {
+            font-size: 18px;
+            font-weight: 700;
             letter-spacing: -0.3px;
         }
 
-        .count-pill {
+        .member-count-tag {
             font-size: 12px;
-            color: var(--text-secondary);
             font-weight: 600;
-            background: var(--bg-secondary);
+            color: var(--text-dim);
+            background: rgba(255, 255, 255, 0.06);
             padding: 5px 12px;
             border-radius: 20px;
-            border: 1px solid var(--border-color);
+            border: 1px solid var(--card-border);
             font-variant-numeric: tabular-nums;
         }
 
-        /* Участники */
-        .members-grid {
+        /* Участники роли */
+        .members-flex {
             display: flex;
             flex-wrap: wrap;
             gap: 6px;
         }
 
-        .member-chip {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            padding: 6px 10px;
+        .member-badge {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--card-border);
+            padding: 6px 12px;
             border-radius: 8px;
             font-size: 13px;
-            color: var(--text-primary);
+            color: var(--text-main);
             display: inline-flex;
             align-items: center;
-            gap: 5px;
+            gap: 4px;
         }
 
-        .member-chip.current-user {
-            background: var(--accent-light);
-            border-color: rgba(0, 122, 255, 0.3);
-            color: var(--accent);
+        .member-badge.is-me {
+            background: var(--accent-blue-glow);
+            border-color: rgba(59, 130, 246, 0.4);
+            color: var(--accent-blue);
             font-weight: 600;
         }
 
-        .empty-members {
-            font-size: 13px;
-            color: var(--text-secondary);
-            font-style: italic;
-        }
-
         /* Кнопки */
-        .role-actions {
+        .role-action-row {
             display: flex;
             gap: 8px;
-            margin-top: 2px;
+            margin-top: 4px;
         }
 
-        .btn {
+        .btn-action {
             flex: 1;
             min-height: 42px;
-            padding: 10px 14px;
+            padding: 10px 16px;
             border-radius: var(--radius-btn);
             border: none;
             font-size: 14px;
@@ -302,287 +406,241 @@
             transition: background-color 0.2s ease, opacity 0.15s ease, transform 0.15s cubic-bezier(0.2, 0, 0, 1);
         }
 
-        .btn:active {
+        .btn-action:active {
             transform: scale(0.96);
-            opacity: 0.85;
         }
 
-        .btn:focus-visible {
-            box-shadow: 0 0 0 3px var(--accent-light);
+        .btn-action:focus-visible {
+            box-shadow: 0 0 0 3px var(--accent-blue-glow);
         }
 
-        .btn-primary {
-            background-color: var(--accent);
-            color: var(--accent-text);
+        .btn-accent {
+            background: linear-gradient(135deg, var(--accent-red), #be123c);
+            color: #ffffff;
+            box-shadow: 0 4px 14px var(--accent-red-glow);
         }
 
-        .btn-secondary {
-            background-color: var(--bg-secondary);
-            color: var(--text-primary);
-            border: 1px solid var(--border-color);
+        .btn-blue {
+            background: linear-gradient(135deg, var(--accent-blue), #1d4ed8);
+            color: #ffffff;
+            box-shadow: 0 4px 14px var(--accent-blue-glow);
         }
 
-        .btn-icon {
-            background-color: var(--accent-light);
-            color: var(--accent);
+        .btn-glass {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-main);
+            border: 1px solid var(--card-border);
+        }
+
+        .btn-icon-only {
             flex: initial;
             width: 42px;
             padding: 0;
         }
 
-        .btn-danger {
-            background-color: var(--danger-light);
-            color: var(--danger-color);
+        .btn-danger-glass {
+            background: rgba(225, 29, 72, 0.12);
+            color: var(--accent-red);
+            border: 1px solid rgba(225, 29, 72, 0.25);
             flex: initial;
             width: 42px;
             padding: 0;
         }
 
-        /* Эмодзи пикер */
-        .emoji-picker {
+        /* Выбор эмодзи */
+        .emoji-grid-select {
             display: flex;
             gap: 8px;
-            margin-bottom: 14px;
             overflow-x: auto;
-            padding: 4px 0;
+            padding: 4px 0 12px 0;
         }
 
-        .emoji-option {
-            width: 42px;
-            height: 42px;
+        .emoji-btn-item {
+            width: 44px;
+            height: 44px;
             border-radius: var(--radius-inner);
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--card-border);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 20px;
+            font-size: 22px;
             cursor: pointer;
             flex-shrink: 0;
-            transition: transform 0.15s ease, border-color 0.2s ease;
+            transition: transform 0.15s ease, border-color 0.2s ease, background-color 0.2s ease;
         }
 
-        .emoji-option.selected {
-            border-color: var(--accent);
-            background: var(--accent-light);
-            transform: scale(1.08);
+        .emoji-btn-item.active {
+            border-color: var(--accent-blue);
+            background: var(--accent-blue-glow);
+            transform: scale(1.1);
         }
 
-        /* Формы и карточки */
-        .card {
-            background: var(--bg-card);
-            border-radius: var(--radius-outer);
-            padding: 18px;
-            border: 1px solid var(--border-color);
-            box-shadow: var(--shadow-subtle);
-            margin-bottom: 16px;
-        }
-
-        .card h2 {
-            font-size: 16px;
-            font-weight: 700;
-            margin-bottom: 12px;
-        }
-
-        .form-group {
+        /* Поля ввода */
+        .input-group {
             display: flex;
             flex-direction: column;
             gap: 6px;
-            margin-bottom: 12px;
+            margin-bottom: 14px;
         }
 
-        .form-label {
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--text-secondary);
+        .input-label {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-dim);
             text-transform: uppercase;
-            letter-spacing: 0.3px;
+            letter-spacing: 0.5px;
         }
 
-        .form-row {
-            display: flex;
-            gap: 8px;
-        }
-
-        .input-field, .textarea-field {
+        .text-input, .textarea-input {
             width: 100%;
             padding: 12px 14px;
             border-radius: var(--radius-btn);
-            border: 1px solid var(--border-color);
-            background: var(--bg-secondary);
-            color: var(--text-primary);
-            font-size: 16px; /* 16px для mobile */
+            border: 1px solid var(--card-border);
+            background: rgba(0, 0, 0, 0.25);
+            color: var(--text-main);
+            font-size: 16px;
             outline: none;
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }
 
-        .textarea-field {
-            min-height: 90px;
+        .textarea-input {
+            min-height: 110px;
             resize: vertical;
             font-family: inherit;
         }
 
-        .input-field:focus-visible, .textarea-field:focus-visible {
-            border-color: var(--accent);
-            box-shadow: 0 0 0 3px var(--accent-light);
+        .text-input:focus-visible, .textarea-input:focus-visible {
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 0 3px var(--accent-blue-glow);
         }
 
-        /* Админка стили */
-        .admin-badge {
-            background: rgba(255, 149, 0, 0.15);
-            color: #ff9500;
-            border: 1px solid rgba(255, 149, 0, 0.3);
-            padding: 4px 10px;
-            border-radius: 20px;
-            font-size: 11px;
-            font-weight: 700;
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            margin-bottom: 12px;
-        }
-
-        .preset-chips {
+        /* Переключатель тумблер (Single vs Global Broadcast) */
+        .toggle-mode-box {
             display: flex;
-            gap: 6px;
-            overflow-x: auto;
-            padding-bottom: 6px;
-            margin-bottom: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 4px;
+            border-radius: 12px;
+            border: 1px solid var(--card-border);
+            margin-bottom: 16px;
+            gap: 4px;
         }
 
-        .preset-chip {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 12px;
+        .toggle-option {
+            flex: 1;
+            padding: 10px;
+            border-radius: 8px;
+            border: none;
+            background: transparent;
+            color: var(--text-dim);
+            font-size: 13px;
             font-weight: 600;
-            color: var(--text-primary);
             cursor: pointer;
-            white-space: nowrap;
-            transition: background-color 0.2s ease, transform 0.15s ease;
+            text-align: center;
+            transition: background-color 0.2s ease, color 0.2s ease;
         }
 
-        .preset-chip:active {
-            transform: scale(0.95);
+        .toggle-option.active {
+            background: var(--accent-blue);
+            color: #ffffff;
+            box-shadow: 0 2px 10px var(--accent-blue-glow);
         }
 
         /* Статистика */
-        .stats-grid {
+        .stats-2x2 {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 12px;
             margin-bottom: 16px;
         }
 
-        .stat-card {
-            background: var(--bg-card);
+        .stat-box-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(30px);
+            border: 1px solid var(--card-border);
             border-radius: var(--radius-outer);
-            padding: 16px;
-            border: 1px solid var(--border-color);
+            padding: 18px;
             text-align: center;
-            box-shadow: var(--shadow-subtle);
         }
 
-        .stat-number {
-            font-size: 26px;
+        .stat-val {
+            font-size: 28px;
             font-weight: 800;
-            color: var(--accent);
-            margin-top: 4px;
+            color: var(--accent-blue);
             font-variant-numeric: tabular-nums;
+            margin-top: 4px;
         }
 
-        .stat-label {
+        .stat-tit {
             font-size: 11px;
-            color: var(--text-secondary);
-            font-weight: 600;
+            color: var(--text-dim);
+            font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 0.4px;
+            letter-spacing: 0.5px;
         }
 
         /* Списки */
-        .user-row, .log-item {
+        .list-row-item {
             display: flex;
             justify-content: space-between;
             align-items: center;
             padding: 12px 0;
-            border-bottom: 1px solid var(--border-color);
+            border-bottom: 1px solid var(--card-border);
         }
 
-        .user-row:last-child, .log-item:last-child {
-            border-bottom: none;
-        }
-
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 14px;
-            font-weight: 600;
-        }
-
-        .role-tag {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            font-size: 11px;
-            padding: 3px 8px;
-            border-radius: 6px;
-            color: var(--text-secondary);
-        }
+        .list-row-item:last-child { border-bottom: none; }
 
         /* Модалка */
-        .modal-backdrop {
+        .modal-overlay {
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0, 0, 0, 0.45);
-            backdrop-filter: blur(6px);
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(10px);
             z-index: 200;
             display: none;
             align-items: flex-end;
         }
 
-        .modal-backdrop.open { display: flex; }
+        .modal-overlay.open { display: flex; }
 
-        .modal-sheet {
-            background: var(--bg-primary);
+        .modal-card-sheet {
+            background: var(--bg-color);
+            border-top: 1px solid var(--card-border);
             border-top-left-radius: 24px;
             border-top-right-radius: 24px;
             width: 100%;
             max-height: 85vh;
-            padding: 20px 16px 34px 16px;
+            padding: 22px 18px 36px 18px;
             display: flex;
             flex-direction: column;
             gap: 14px;
-            box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.2);
-            animation: slideUp 0.25s cubic-bezier(0.2, 0, 0, 1);
+            box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.5);
+            animation: sheetUp 0.25s cubic-bezier(0.2, 0, 0, 1);
         }
 
-        @keyframes slideUp {
+        @keyframes sheetUp {
             from { transform: translateY(100%); }
             to { transform: translateY(0); }
         }
 
-        .modal-header {
+        .modal-head {
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
 
-        .modal-title { font-size: 18px; font-weight: 700; }
-
-        .close-btn {
-            background: var(--bg-secondary);
+        .close-modal-btn {
+            background: rgba(255, 255, 255, 0.1);
             border: none;
-            width: 32px;
-            height: 32px;
+            width: 32px; height: 32px;
             border-radius: 50%;
+            color: var(--text-dim);
             font-size: 14px;
             font-weight: 700;
-            color: var(--text-secondary);
             cursor: pointer;
         }
 
-        .modal-scroll {
+        .modal-scroll-area {
             overflow-y: auto;
             max-height: 50vh;
             display: flex;
@@ -591,219 +649,240 @@
         }
 
         /* Тоаст */
-        .status-toast {
+        .toast-popup {
             position: fixed;
             bottom: 24px;
             left: 50%;
             transform: translateX(-50%) translateY(100px);
-            background: var(--text-primary);
-            color: var(--bg-primary);
-            padding: 12px 22px;
+            background: var(--text-main);
+            color: var(--bg-color);
+            padding: 12px 24px;
             border-radius: 30px;
             font-size: 14px;
-            font-weight: 600;
+            font-weight: 700;
             transition: transform 0.25s cubic-bezier(0.2, 0, 0, 1);
             z-index: 300;
-            box-shadow: var(--shadow-card);
+            box-shadow: var(--card-shadow);
         }
 
-        .status-toast.visible {
+        .toast-popup.visible {
             transform: translateX(-50%) translateY(0);
         }
 
-        .loader {
+        .loader-text {
             text-align: center;
             padding: 40px;
-            color: var(--text-secondary);
+            color: var(--text-dim);
             font-size: 14px;
         }
     </style>
 </head>
 <body>
 
-    <!-- Шапка -->
-    <div class="app-header">
-        <div class="header-title">
-            <h1>Teger Roles</h1>
-            <p id="chat-info">Синхронизация...</p>
-        </div>
-        <div class="user-badge" id="user-badge">
-            👤 <span id="user-name">Гость</span>
-        </div>
+    <!-- Аврора фон (стиль dayson.lol) -->
+    <div class="aurora-bg">
+        <div class="aurora-blob blob-1"></div>
+        <div class="aurora-blob blob-2"></div>
     </div>
 
-    <!-- Главные Табы (Включая секретную админку) -->
-    <div class="tabs-nav">
-        <button class="tab-btn active" onclick="switchTab('roles', this)">🛡️ Роли</button>
-        <button class="tab-btn" onclick="switchTab('create', this)">➕ Создать</button>
-        <button class="tab-btn" onclick="switchTab('stats', this)">📊 Состав</button>
-        <button class="tab-btn" onclick="switchTab('logs', this)">📜 История</button>
-        <button class="tab-btn admin-tab" id="admin-tab-btn" onclick="switchTab('admin', this)">⚡ Админка</button>
-    </div>
-
-    <!-- ТАБ 1: Роли -->
-    <div id="tab-roles" class="tab-content active">
-        <div class="search-box">
-            <span class="search-icon">🔍</span>
-            <input type="text" id="search-input" class="search-input" placeholder="Поиск роли по названию..." oninput="filterRoles()">
-        </div>
-        <div id="roles-list" class="roles-container">
-            <div class="loader">Загрузка ролей...</div>
-        </div>
-    </div>
-
-    <!-- ТАБ 2: Создать роль -->
-    <div id="tab-create" class="tab-content">
-        <div class="card">
-            <h2>Создание новой роли</h2>
-            <div class="emoji-picker" id="emoji-picker">
-                <div class="emoji-option selected" onclick="selectEmoji(this, '🛡️')">🛡️</div>
-                <div class="emoji-option" onclick="selectEmoji(this, '💻')">💻</div>
-                <div class="emoji-option" onclick="selectEmoji(this, '🎨')">🎨</div>
-                <div class="emoji-option" onclick="selectEmoji(this, '🎮')">🎮</div>
-                <div class="emoji-option" onclick="selectEmoji(this, '⚡')">⚡</div>
-                <div class="emoji-option" onclick="selectEmoji(this, '🚀')">🚀</div>
-                <div class="emoji-option" onclick="selectEmoji(this, '👑')">👑</div>
-                <div class="emoji-option" onclick="selectEmoji(this, '🔥')">🔥</div>
-                <div class="emoji-option" onclick="selectEmoji(this, '🎯')">🎯</div>
-            </div>
-
-            <div class="form-row">
-                <input type="text" id="new-role-input" class="input-field" placeholder="Название роли (например: dev)">
-                <button class="btn btn-primary" style="flex: initial; min-width: 100px;" onclick="createNewRole()">Создать</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- ТАБ 3: Состав -->
-    <div id="tab-stats" class="tab-content">
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-label">Всего ролей</div>
-                <div id="stat-roles-count" class="stat-number">0</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Участников</div>
-                <div id="stat-members-count" class="stat-number">0</div>
-            </div>
-        </div>
-
-        <div class="card">
-            <h2>Участники группы</h2>
-            <div id="roster-list">
-                <div class="loader">Загрузка состава...</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ТАБ 4: История -->
-    <div id="tab-logs" class="tab-content">
-        <div class="card">
-            <h2>📜 История действий чата</h2>
-            <div id="logs-list">
-                <div class="loader">Загрузка истории...</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ТАБ 5: Секретная АДМИНКА (Только для OWNER_ID) -->
-    <div id="tab-admin" class="tab-content">
-        <div class="admin-badge">👑 Панель Супер-Администратора (Владелец)</div>
-        
-        <!-- Функция /send -->
-        <div class="card">
-            <h2>📢 Отправка сообщений (/send)</h2>
-            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px;">
-                Отправка любого HTML-сообщения в любой чат прямо от лица бота.
-            </p>
-
-            <!-- Быстрые шаблоны -->
-            <div class="preset-chips">
-                <div class="preset-chip" onclick="applyPreset('birthday')">🎂 Поздравление с ДР</div>
-                <div class="preset-chip" onclick="applyPreset('alert')">🚨 Срочный анонс</div>
-                <div class="preset-chip" onclick="applyPreset('info')">💡 Объявление</div>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label">Chat ID группы / канала / юзера</label>
-                <input type="text" id="admin-chat-id" class="input-field" placeholder="-1001234567890">
-            </div>
-
-            <div class="form-group">
-                <label class="form-label">Текст сообщения (HTML форматирование)</label>
-                <textarea id="admin-msg-text" class="textarea-field" placeholder="🎉 <b>Привет!</b> Сообщение..."></textarea>
-            </div>
-
-            <button class="btn btn-primary" id="admin-send-btn" style="width: 100%;" onclick="sendAdminMessage()">
-                🚀 Отправить сообщение
-            </button>
-        </div>
-
-        <!-- Глобальная статистика системы -->
-        <div class="card">
-            <h2>📊 Глобальная система Teger</h2>
-            <div class="stats-grid" style="margin-bottom: 0;">
-                <div class="stat-card">
-                    <div class="stat-label">Всего чатов</div>
-                    <div id="admin-stat-chats" class="stat-number">-</div>
+    <div class="app-wrapper">
+        <!-- Шапка -->
+        <div class="top-header">
+            <div class="brand-title">
+                <div class="brand-logo">T</div>
+                <div class="brand-text">
+                    <h1>Teger Roles</h1>
+                    <p id="chat-info">Синхронизация...</p>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-label">Всего ролей БД</div>
-                    <div id="admin-stat-roles" class="stat-number">-</div>
+            </div>
+            <div class="user-pill">
+                👤 <span id="user-display-name">Гость</span>
+            </div>
+        </div>
+
+        <!-- Плавающая Навигация (Pill Nav) -->
+        <div class="nav-pill-wrapper">
+            <button class="nav-item-btn active" onclick="switchTab('roles', this)">🛡️ Роли</button>
+            <button class="nav-item-btn" onclick="switchTab('create', this)">➕ Создать</button>
+            <button class="nav-item-btn" onclick="switchTab('stats', this)">📊 Состав</button>
+            <button class="nav-item-btn" onclick="switchTab('logs', this)">📜 История</button>
+            <button class="nav-item-btn admin-tab" id="admin-tab-btn" onclick="switchTab('admin', this)">⚡ Админка</button>
+        </div>
+
+        <!-- ТАБ 1: Роли -->
+        <div id="tab-roles" class="tab-content active">
+            <div class="search-container">
+                <span class="search-icon-inside">🔍</span>
+                <input type="text" id="search-input" class="search-input" placeholder="Поиск по названию роли..." oninput="filterRoles()">
+            </div>
+            <div id="roles-list" class="roles-list-container">
+                <div class="loader-text">Загрузка ролей...</div>
+            </div>
+        </div>
+
+        <!-- ТАБ 2: Создать -->
+        <div id="tab-create" class="tab-content">
+            <div class="glass-card">
+                <div class="card-file-header">
+                    <span class="file-icon">📄</span> create_role.json
                 </div>
-                <div class="stat-card">
-                    <div class="stat-label">Юзеров в базе</div>
-                    <div id="admin-stat-users" class="stat-number">-</div>
+                <div class="card-title">Создание новой роли</div>
+                
+                <div class="emoji-grid-select" id="emoji-picker">
+                    <div class="emoji-btn-item active" onclick="selectEmoji(this, '🛡️')">🛡️</div>
+                    <div class="emoji-btn-item" onclick="selectEmoji(this, '💻')">💻</div>
+                    <div class="emoji-btn-item" onclick="selectEmoji(this, '🎨')">🎨</div>
+                    <div class="emoji-btn-item" onclick="selectEmoji(this, '🎮')">🎮</div>
+                    <div class="emoji-btn-item" onclick="selectEmoji(this, '⚡')">⚡</div>
+                    <div class="emoji-btn-item" onclick="selectEmoji(this, '🚀')">🚀</div>
+                    <div class="emoji-btn-item" onclick="selectEmoji(this, '👑')">👑</div>
+                    <div class="emoji-btn-item" onclick="selectEmoji(this, '🔥')">🔥</div>
+                    <div class="emoji-btn-item" onclick="selectEmoji(this, '🎯')">🎯</div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-label">Записей логов</div>
-                    <div id="admin-stat-logs" class="stat-number">-</div>
+
+                <div class="input-group">
+                    <label class="input-label">Название роли</label>
+                    <input type="text" id="new-role-input" class="text-input" placeholder="например: dev или streamer">
+                </div>
+
+                <button class="btn-action btn-blue" style="width: 100%;" onclick="createNewRole()">
+                    ✨ Создать роль
+                </button>
+            </div>
+        </div>
+
+        <!-- ТАБ 3: Состав -->
+        <div id="tab-stats" class="tab-content">
+            <div class="stats-2x2">
+                <div class="stat-box-card">
+                    <div class="stat-tit">Всего ролей</div>
+                    <div id="stat-roles-count" class="stat-val">0</div>
+                </div>
+                <div class="stat-box-card">
+                    <div class="stat-tit">Участников</div>
+                    <div id="stat-members-count" class="stat-val">0</div>
+                </div>
+            </div>
+
+            <div class="glass-card">
+                <div class="card-file-header">
+                    <span class="file-icon">👥</span> members_roster.db
+                </div>
+                <div class="card-title">Участники группы</div>
+                <div id="roster-list">
+                    <div class="loader-text">Загрузка состава...</div>
                 </div>
             </div>
         </div>
 
-        <!-- Инфраструктура для будущих админ-функций -->
-        <div class="card">
-            <h2>🔮 Будущие функции (Админ-модули)</h2>
-            <div style="display: flex; flex-direction: column; gap: 8px;">
-                <div style="background: var(--bg-secondary); padding: 12px; border-radius: 10px; border: 1px solid var(--border-color); font-size: 13px;">
-                    <b>📢 Глобальная рассылка</b> — отправка сообщения во все чаты где есть бот <i>(Готово к подключению)</i>
+        <!-- ТАБ 4: История -->
+        <div id="tab-logs" class="tab-content">
+            <div class="glass-card">
+                <div class="card-file-header">
+                    <span class="file-icon">📜</span> audit_history.log
                 </div>
-                <div style="background: var(--bg-secondary); padding: 12px; border-radius: 10px; border: 1px solid var(--border-color); font-size: 13px;">
-                    <b>🧹 Очистка неактивных ролей</b> — автоматическая архивация <i>(Готово к подключению)</i>
-                </div>
-                <div style="background: var(--bg-secondary); padding: 12px; border-radius: 10px; border: 1px solid var(--border-color); font-size: 13px;">
-                    <b>🔒 Глобальный черный список</b> — блокировка нарушителей <i>(Готово к подключению)</i>
+                <div class="card-title">История изменений чата</div>
+                <div id="logs-list">
+                    <div class="loader-text">Загрузка истории...</div>
                 </div>
             </div>
         </div>
+
+        <!-- ТАБ 5: Админка Владельца (ТОЛЬКО для OWNER) -->
+        <div id="tab-admin" class="tab-content">
+            <!-- Рассылка и Сообщения -->
+            <div class="glass-card">
+                <div class="card-file-header">
+                    <span class="file-icon">📡</span> broadcast_system.sh
+                </div>
+                <div class="card-title">⚡ Центр Уведомлений Владельца</div>
+
+                <!-- Режим рассылки: Одиночный чат VS Массовая рассылка -->
+                <div class="toggle-mode-box">
+                    <button class="toggle-option active" id="toggle-single" onclick="setSendMode('single')">
+                        🎯 Один чат
+                    </button>
+                    <button class="toggle-option" id="toggle-global" onclick="setSendMode('global')">
+                        📢 Массовая рассылка (Все чаты)
+                    </button>
+                </div>
+
+                <!-- Поле Chat ID (Показывается при единичном режиме) -->
+                <div class="input-group" id="chat-id-group">
+                    <label class="input-label">Chat ID группы / канала</label>
+                    <input type="text" id="admin-chat-id" class="text-input" placeholder="-1001234567890">
+                </div>
+
+                <!-- Текст сообщения -->
+                <div class="input-group">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <label class="input-label">Текст сообщения (HTML)</label>
+                        <button style="background:none; border:none; color:var(--accent-blue); font-size:11px; font-weight:700; cursor:pointer;" onclick="restoreLastMessage()">
+                            🔄 Вставить последнее
+                        </button>
+                    </div>
+                    <textarea id="admin-msg-text" class="textarea-input" placeholder="🎉 <b>Привет!</b> Наберите текст..." oninput="saveDraftMessage()"></textarea>
+                </div>
+
+                <button class="btn-action btn-accent" id="admin-send-btn" style="width: 100%; min-height:46px;" onclick="sendAdminMessage()">
+                    🚀 Запустить рассылку
+                </button>
+            </div>
+
+            <!-- Глобальные данные бота -->
+            <div class="glass-card">
+                <div class="card-file-header">
+                    <span class="file-icon">📊</span> system_overview.json
+                </div>
+                <div class="card-title">Глобальная статистика бота</div>
+                <div class="stats-2x2" style="margin-bottom: 0;">
+                    <div class="stat-box-card">
+                        <div class="stat-tit">Чатов в базе</div>
+                        <div id="admin-stat-chats" class="stat-val">-</div>
+                    </div>
+                    <div class="stat-box-card">
+                        <div class="stat-tit">Всего ролей</div>
+                        <div id="admin-stat-roles" class="stat-val">-</div>
+                    </div>
+                    <div class="stat-box-card">
+                        <div class="stat-tit">Участников</div>
+                        <div id="admin-stat-users" class="stat-val">-</div>
+                    </div>
+                    <div class="stat-box-card">
+                        <div class="stat-tit">Записей логов</div>
+                        <div id="admin-stat-logs" class="stat-val">-</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div>
 
-    <!-- Модальное окно участников -->
-    <div id="modal-backdrop" class="modal-backdrop" onclick="closeMemberModal(event)">
-        <div class="modal-sheet" onclick="event.stopPropagation()">
-            <div class="modal-header">
-                <div id="modal-title" class="modal-title">Добавление участников</div>
-                <button class="close-btn" onclick="closeMemberModal()">✕</button>
+    <!-- Модалка управления участниками -->
+    <div id="modal-backdrop" class="modal-overlay" onclick="closeMemberModal(event)">
+        <div class="modal-card-sheet" onclick="event.stopPropagation()">
+            <div class="modal-head">
+                <div id="modal-title" style="font-size:18px; font-weight:700;">Участники роли</div>
+                <button class="close-modal-btn" onclick="closeMemberModal()">✕</button>
             </div>
             
-            <div class="form-row">
-                <input type="text" id="manual-user-input" class="input-field" placeholder="Добавить @username вручную">
-                <button class="btn btn-primary" style="flex: initial;" onclick="addManualUser()">+ Добавить</button>
+            <div style="display:flex; gap:8px;">
+                <input type="text" id="manual-user-input" class="text-input" placeholder="Добавить @username вручную">
+                <button class="btn-action btn-blue" style="flex: initial;" onclick="addManualUser()">+ Добавить</button>
             </div>
 
-            <div class="search-box" style="margin-bottom: 0;">
-                <span class="search-icon">🔍</span>
+            <div class="search-container" style="margin-bottom: 0;">
+                <span class="search-icon-inside">🔍</span>
                 <input type="text" id="modal-search" class="search-input" placeholder="Поиск в списке чата..." oninput="filterModalMembers()">
             </div>
 
-            <div id="modal-members-list" class="modal-scroll">
-                <div class="loader">Загрузка участников...</div>
+            <div id="modal-members-list" class="modal-scroll-area">
+                <div class="loader-text">Загрузка участников...</div>
             </div>
         </div>
     </div>
 
-    <div id="toast" class="status-toast"></div>
+    <div id="toast" class="toast-popup"></div>
 
     <script>
         const tg = window.Telegram.WebApp;
@@ -818,14 +897,21 @@
         let activeModalRole = null;
         let selectedRoleEmoji = '🛡️';
         let isOwnerUser = false;
+        let currentSendMode = 'single'; // 'single' | 'global'
 
-        document.getElementById('user-name').textContent = currentUser.first_name || "Гость";
+        document.getElementById('user-display-name').textContent = currentUser.first_name || "Гость";
         document.getElementById('chat-info').textContent = chatId 
             ? `Группа ID: ${chatId}` 
             : `Пользователь: ${currentUser.first_name}`;
 
         if (chatId) {
             document.getElementById('admin-chat-id').value = chatId;
+        }
+
+        // Загрузка последнего сохраненного текста черновика рассылки
+        const savedDraft = localStorage.getItem("last_broadcast_message");
+        if (savedDraft) {
+            document.getElementById('admin-msg-text').value = savedDraft;
         }
 
         function triggerHaptic(type = 'light') {
@@ -836,22 +922,59 @@
             const toast = document.getElementById('toast');
             toast.textContent = text;
             toast.classList.add('visible');
-            setTimeout(() => { toast.classList.remove('visible'); }, 2500);
+            setTimeout(() => { toast.classList.remove('visible'); }, 3000);
+        }
+
+        function saveDraftMessage() {
+            const val = document.getElementById('admin-msg-text').value;
+            localStorage.setItem("last_broadcast_message", val);
+        }
+
+        function restoreLastMessage() {
+            const saved = localStorage.getItem("last_broadcast_message");
+            if (saved) {
+                document.getElementById('admin-msg-text').value = saved;
+                triggerHaptic('light');
+                showToast("Восстановлен последний текст!");
+            } else {
+                showToast("Черновиков пока нет");
+            }
+        }
+
+        function setSendMode(mode) {
+            currentSendMode = mode;
+            triggerHaptic('light');
+            const singleBtn = document.getElementById('toggle-single');
+            const globalBtn = document.getElementById('toggle-global');
+            const chatIdGroup = document.getElementById('chat-id-group');
+            const sendBtn = document.getElementById('admin-send-btn');
+
+            if (mode === 'global') {
+                singleBtn.classList.remove('active');
+                globalBtn.classList.add('active');
+                chatIdGroup.style.display = 'none';
+                sendBtn.textContent = '📢 Запустить МАССОВУЮ рассылку во ВСЕ чаты';
+            } else {
+                globalBtn.classList.remove('active');
+                singleBtn.classList.add('active');
+                chatIdGroup.style.display = 'flex';
+                sendBtn.textContent = '🚀 Отправить сообщение в чат';
+            }
         }
 
         function selectEmoji(el, emoji) {
             triggerHaptic('light');
-            document.querySelectorAll('.emoji-option').forEach(e => e.classList.remove('selected'));
-            el.classList.add('selected');
+            document.querySelectorAll('.emoji-btn-item').forEach(e => e.classList.remove('active'));
+            el.classList.add('active');
             selectedRoleEmoji = emoji;
         }
 
         function switchTab(tabName, btnElement) {
             triggerHaptic('light');
-            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.nav-item-btn').forEach(btn => btn.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
             
-            const targetBtn = btnElement || document.querySelector(`.tab-btn[onclick*="${tabName}"]`);
+            const targetBtn = btnElement || document.querySelector(`.nav-item-btn[onclick*="${tabName}"]`);
             if (targetBtn) targetBtn.classList.add('active');
             const targetContent = document.getElementById(`tab-${tabName}`);
             if (targetContent) targetContent.classList.add('active');
@@ -883,7 +1006,7 @@
         async function fetchRoles() {
             if (!chatId) {
                 document.getElementById('roles-list').innerHTML = `
-                    <div class="loader">
+                    <div class="loader-text">
                         Откройте Mini App из группы,<br>чтобы загрузить её роли.
                     </div>`;
                 return;
@@ -904,7 +1027,7 @@
             } catch (err) {
                 console.error("Ошибка загрузки:", err);
                 document.getElementById('roles-list').innerHTML = `
-                    <div class="loader" style="color: var(--danger-color);">
+                    <div class="loader-text" style="color: var(--accent-red);">
                         Ошибка подключения к серверу
                     </div>`;
             }
@@ -949,41 +1072,28 @@
             }
         }
 
-        function applyPreset(type) {
-            triggerHaptic('light');
-            const targetChat = document.getElementById('admin-chat-id').value || chatId || '-1001750819389';
-            document.getElementById('admin-chat-id').value = targetChat;
-
-            if (type === 'birthday') {
-                document.getElementById('admin-msg-text').value = 
-                    `🎉 <b>ВНИМАНИЕ! СПЕЦИАЛЬНОЕ УВЕДОМЛЕНИЕ!</b> 🚨\n\n` +
-                    `Сегодня свой праздник отмечает <b>Ваня</b>! 👑\n\n` +
-                    `🎂 <b>Ваня, с Днём Рождения!</b> 🥳\n` +
-                    `Желаем пинга в 1 мс, непрерывного аптайма, железного здоровья и побед!\n\n` +
-                    `🛡️ <i>Все роли чата призывают: <b>УРА!</b></i> 🎉🎉🎉`;
-            } else if (type === 'alert') {
-                document.getElementById('admin-msg-text').value = 
-                    `🚨 <b>СРОЧНОЕ ОБЪЯВЛЕНИЕ АДМИНИСТРАЦИИ!</b>\n\n` +
-                    `Пожалуйста, обратите внимание на новые правила группы.`;
-            } else if (type === 'info') {
-                document.getElementById('admin-msg-text').value = 
-                    `💡 <b>Информационное сообщение</b>\n\n` +
-                    `Система работает в штатном режиме.`;
-            }
-        }
-
         async function sendAdminMessage() {
             const targetChatId = document.getElementById('admin-chat-id').value.trim();
             const messageText = document.getElementById('admin-msg-text').value.trim();
 
-            if (!targetChatId || !messageText) {
-                showToast("Заполните Chat ID и Текст");
+            if (!messageText) {
+                showToast("Введите текст сообщения");
+                return;
+            }
+
+            if (currentSendMode === 'single' && !targetChatId) {
+                showToast("Укажите Chat ID чата");
+                return;
+            }
+
+            const isGlobal = (currentSendMode === 'global');
+            if (isGlobal && !confirm("📢 Отправить это сообщение ВО ВСЕ чаты группы бота?")) {
                 return;
             }
 
             const btn = document.getElementById('admin-send-btn');
             btn.disabled = true;
-            btn.textContent = "⏳ Отправка...";
+            btn.textContent = "⏳ Выполнение рассылки...";
 
             try {
                 const res = await fetch('/api/admin/send', {
@@ -992,39 +1102,40 @@
                     body: JSON.stringify({
                         user_id: currentUser.id,
                         chat_id: targetChatId,
-                        message: messageText
+                        message: messageText,
+                        is_global: isGlobal
                     })
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
                     triggerHaptic('medium');
-                    showToast("✅ Сообщение успешно отправлено!");
-                    document.getElementById('admin-msg-text').value = '';
+                    showToast(data.message || "✅ Успешно отправлено!");
+                    saveDraftMessage();
                 } else {
-                    showToast(data.error || "Ошибка отправки");
+                    showToast(data.error || "Ошибка рассылки");
                 }
             } catch (e) {
                 showToast("Ошибка подключения к серверу");
             } finally {
                 btn.disabled = false;
-                btn.textContent = "🚀 Отправить сообщение";
+                btn.textContent = isGlobal ? '📢 Запустить МАССОВУЮ рассылку во ВСЕ чаты' : '🚀 Отправить сообщение в чат';
             }
         }
 
         function renderAuditLogs(logs) {
             const container = document.getElementById('logs-list');
             if (logs.length === 0) {
-                container.innerHTML = `<div class="loader">История пока пуста</div>`;
+                container.innerHTML = `<div class="loader-text">История пока пуста</div>`;
                 return;
             }
 
             container.innerHTML = logs.map(l => `
-                <div class="log-item">
+                <div class="list-row-item">
                     <div style="display:flex; justify-content:space-between; width:100%; font-weight:600;">
                         <span>${escapeHtml(l.username)} ➔ ${escapeHtml(l.action)}</span>
-                        <span style="font-size:11px; color:var(--text-secondary);">${escapeHtml(l.time)}</span>
+                        <span style="font-size:11px; color:var(--text-dim);">${escapeHtml(l.time)}</span>
                     </div>
-                    <div style="font-size:12px; color:var(--text-secondary); margin-top:2px;">${escapeHtml(l.details || '')}</div>
+                    <div style="font-size:12px; color:var(--text-dim); margin-top:2px;">${escapeHtml(l.details || '')}</div>
                 </div>
             `).join('');
         }
@@ -1032,18 +1143,18 @@
         function renderRoster(members) {
             const container = document.getElementById('roster-list');
             if (members.length === 0) {
-                container.innerHTML = `<div class="loader">Участники не найдены</div>`;
+                container.innerHTML = `<div class="loader-text">Участники не найдены</div>`;
                 return;
             }
 
             container.innerHTML = members.map(m => {
                 const rolesBadges = m.roles.length > 0
-                    ? m.roles.map(r => `<span class="role-tag">🛡️ ${escapeHtml(r)}</span>`).join('')
-                    : `<span class="role-tag">без ролей</span>`;
+                    ? m.roles.map(r => `<span style="background:rgba(255,255,255,0.06); border:1px solid var(--card-border); font-size:11px; padding:3px 8px; border-radius:6px; color:var(--text-dim);">🛡️ ${escapeHtml(r)}</span>`).join('')
+                    : `<span style="font-size:11px; color:var(--text-dim);">без ролей</span>`;
 
                 return `
-                    <div class="user-row">
-                        <div class="user-info">👤 ${escapeHtml(m.username)}</div>
+                    <div class="list-row-item">
+                        <div style="display:flex; align-items:center; gap:8px; font-weight:600;">👤 ${escapeHtml(m.username)}</div>
                         <div>${rolesBadges}</div>
                     </div>
                 `;
@@ -1059,7 +1170,7 @@
         function renderRoles(roles) {
             const container = document.getElementById('roles-list');
             if (roles.length === 0) {
-                container.innerHTML = `<div class="loader">Ролей пока нет</div>`;
+                container.innerHTML = `<div class="loader-text">Ролей пока нет</div>`;
                 return;
             }
 
@@ -1070,32 +1181,32 @@
                 const membersHtml = role.members.length > 0 
                     ? role.members.map(m => {
                         const isMe = m.user_id === currentUser.id;
-                        return `<span class="member-chip ${isMe ? 'current-user' : ''}">
+                        return `<span class="member-badge ${isMe ? 'is-me' : ''}">
                             ${isMe ? '⭐ ' : ''}${escapeHtml(m.username)}
                         </span>`;
                     }).join('')
-                    : `<span class="empty-members">участников нет</span>`;
+                    : `<span style="font-size:13px; color:var(--text-dim); font-style:italic;">участников нет</span>`;
 
                 return `
-                    <div class="role-card">
-                        <div class="role-header">
-                            <div class="role-title">
-                                <div class="role-icon">${roleIcon}</div>
-                                <div class="role-name">${escapeHtml(role.name)}</div>
+                    <div class="role-item-card">
+                        <div class="role-header-row">
+                            <div class="role-identity">
+                                <div class="role-emoji-box">${roleIcon}</div>
+                                <div class="role-name-text">${escapeHtml(role.name)}</div>
                             </div>
-                            <span class="count-pill">${role.members.length} чел.</span>
+                            <span class="member-count-tag">${role.members.length} чел.</span>
                         </div>
-                        <div class="members-grid">
+                        <div class="members-flex">
                             ${membersHtml}
                         </div>
-                        <div class="role-actions">
+                        <div class="role-action-row">
                             ${isMember 
-                                ? `<button class="btn btn-secondary" onclick="leaveRole('${role.name}')">Выйти</button>`
-                                : `<button class="btn btn-primary" onclick="joinRole('${role.name}')">Вступить</button>`
+                                ? `<button class="btn-action btn-glass" onclick="leaveRole('${role.name}')">Выйти</button>`
+                                : `<button class="btn-action btn-blue" onclick="joinRole('${role.name}')">Вступить</button>`
                             }
-                            <button class="btn btn-icon" onclick="openMemberModal('${role.name}')" title="Участники">👤+</button>
-                            <button class="btn btn-icon" onclick="shareRoleLink('${role.name}')" title="Ссылка">🔗</button>
-                            <button class="btn btn-danger" onclick="deleteRole('${role.name}')" title="Удалить">🗑</button>
+                            <button class="btn-action btn-glass btn-icon-only" onclick="openMemberModal('${role.name}')" title="Участники">👤+</button>
+                            <button class="btn-action btn-glass btn-icon-only" onclick="shareRoleLink('${role.name}')" title="Ссылка">🔗</button>
+                            <button class="btn-action btn-danger-glass" onclick="deleteRole('${role.name}')" title="Удалить">🗑</button>
                         </div>
                     </div>
                 `;
@@ -1132,18 +1243,18 @@
             const roleMemberUsernames = targetRole ? targetRole.members.map(m => (m.username || '').toLowerCase()) : [];
 
             if (members.length === 0) {
-                container.innerHTML = `<div class="loader">Список участников пуст</div>`;
+                container.innerHTML = `<div class="loader-text">Список участников пуст</div>`;
                 return;
             }
 
             container.innerHTML = members.map(m => {
                 const inRole = (m.user_id && roleMemberIds.includes(m.user_id)) || (m.username && roleMemberUsernames.includes(m.username.toLowerCase()));
                 return `
-                    <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-secondary); padding:10px 12px; border-radius:10px; border:1px solid var(--border-color);">
-                        <div class="user-info">👤 ${escapeHtml(m.username)}</div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.05); padding:10px 12px; border-radius:10px; border:1px solid var(--card-border);">
+                        <div style="display:flex; align-items:center; gap:8px; font-weight:600;">👤 ${escapeHtml(m.username)}</div>
                         ${inRole 
-                            ? `<button class="btn btn-secondary" style="flex:initial; min-height:36px; padding:6px 12px;" onclick="toggleRoleUser('${activeModalRole}', ${m.user_id}, '${escapeHtml(m.username)}', false)">✅ В роли</button>`
-                            : `<button class="btn btn-primary" style="flex:initial; min-height:36px; padding:6px 12px;" onclick="toggleRoleUser('${activeModalRole}', ${m.user_id}, '${escapeHtml(m.username)}', true)">+ Добавить</button>`
+                            ? `<button class="btn-action btn-glass" style="flex:initial; min-height:36px; padding:6px 12px;" onclick="toggleRoleUser('${activeModalRole}', ${m.user_id}, '${escapeHtml(m.username)}', false)">✅ В роли</button>`
+                            : `<button class="btn-action btn-blue" style="flex:initial; min-height:36px; padding:6px 12px;" onclick="toggleRoleUser('${activeModalRole}', ${m.user_id}, '${escapeHtml(m.username)}', true)">+ Добавить</button>`
                         }
                     </div>
                 `;
@@ -1300,7 +1411,7 @@
             return (text || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         }
 
-        // Запуск проверки прав и первой загрузки
+        // Запуск
         checkOwnerStatus();
         fetchRoles();
     </script>
