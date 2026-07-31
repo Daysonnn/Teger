@@ -696,7 +696,7 @@ def _collect_known_commands() -> None:
                     KNOWN_COMMANDS.add(name.lower())
 
     # Запасной хардкод — сработает, если рефлексия ничего не нашла
-    fallback = {"start", "help", "menu", "create", "delete", "join", "leave", "list", "add", "all", "everyone", "notify"}
+    fallback = {"start", "help", "menu", "create", "delete", "join", "leave", "list", "add", "all", "everyone", "notify", "send"}
     KNOWN_COMMANDS.update(fallback)
 
 
