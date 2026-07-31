@@ -117,18 +117,14 @@
             gap: 10px;
         }
 
-        .brand-logo {
-            width: 36px;
-            height: 36px;
-            border-radius: 10px;
-            background: linear-gradient(135deg, var(--accent-red), #991b1b);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 800;
-            font-size: 18px;
-            color: #ffffff;
-            box-shadow: 0 4px 14px var(--accent-red-glow);
+        .brand-logo-img {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            object-fit: cover;
+            border: 1px solid var(--nav-border);
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+            flex-shrink: 0;
         }
 
         .brand-text h1 {
@@ -169,26 +165,38 @@
             gap: 4px;
             margin-bottom: 18px;
             overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        .nav-pill-wrapper::-webkit-scrollbar,
+        .emoji-grid-select::-webkit-scrollbar,
+        .preset-chips::-webkit-scrollbar,
+        ::-webkit-scrollbar {
+            display: none !important;
+            width: 0 !important;
+            height: 0 !important;
         }
 
         .nav-item-btn {
-            flex: 1;
-            padding: 10px 14px;
+            flex: 1 1 auto;
+            padding: 8px 10px;
             border-radius: 12px;
             border: none;
             background: transparent;
             color: var(--text-dim);
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
             cursor: pointer;
             white-space: nowrap;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 6px;
+            gap: 4px;
             transition: background-color 0.2s ease, color 0.2s ease, transform 0.15s cubic-bezier(0.2, 0, 0, 1);
-            min-height: 40px;
+            min-height: 38px;
         }
 
         .nav-item-btn:active {
@@ -689,7 +697,7 @@
         <!-- Шапка -->
         <div class="top-header">
             <div class="brand-title">
-                <div class="brand-logo">T</div>
+                <img src="/assets/teger.png" class="brand-logo-img" alt="Teger Avatar">
                 <div class="brand-text">
                     <h1>Teger Roles</h1>
                     <p id="chat-info">Синхронизация...</p>
