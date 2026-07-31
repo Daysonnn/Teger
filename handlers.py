@@ -510,6 +510,22 @@ async def list_roles(message: Message):
 
 
 
+@router.message(Command("send"))
+async def send_custom_msg(message: Message, command: CommandObject, bot: Bot):
+    if not command.args or len(command.args.split()) < 2:
+        await message.reply("💡 Использование: <code>/send &lt;chat_id&gt; &lt;текст сообщения&gt;</code>", parse_mode=ParseMode.HTML)
+        return
+
+    parts = command.args.split(maxsplit=1)
+    target_chat_id = parts[0]
+    msg_text = parts[1]
+
+    try:
+        await bot.send_message(chat_id=target_chat_id, text=msg_text, parse_mode=ParseMode.HTML)
+        await message.reply(f"✅ Сообщение успешно отправлено в <code>{target_chat_id}</code>!", parse_mode=ParseMode.HTML)
+    except Exception as e:
+        await message.reply(f"❌ Ошибка отправки: <code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML)
+
 @router.message(Command("notify"))
 async def notify_role(message: Message, command: CommandObject, bot: Bot):
     if not await is_group(message): return
