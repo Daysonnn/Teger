@@ -512,6 +512,11 @@ async def list_roles(message: Message):
 
 @router.message(Command("send"))
 async def send_custom_msg(message: Message, command: CommandObject, bot: Bot):
+    # Ограничение: доступно только админам чата (или в ЛС)
+    if message.chat.type != ChatType.PRIVATE and not await check_admin(bot, message):
+        await message.reply("👑 Команда /send доступна только администраторам!")
+        return
+
     if not command.args or len(command.args.split()) < 2:
         await message.reply("💡 Использование: <code>/send &lt;chat_id&gt; &lt;текст сообщения&gt;</code>", parse_mode=ParseMode.HTML)
         return
