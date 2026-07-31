@@ -3,81 +3,156 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Менеджер Ролей</title>
+    <title>Teger — Ролевой Менеджер</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         :root {
-            --bg-color: var(--tg-theme-bg-color, #ffffff);
-            --text-color: var(--tg-theme-text-color, #000000);
-            --hint-color: var(--tg-theme-hint-color, #8e8e93);
-            --link-color: var(--tg-theme-link-color, #007aff);
-            --button-color: var(--tg-theme-button-color, #007aff);
-            --button-text-color: var(--tg-theme-button-text-color, #ffffff);
-            --secondary-bg-color: var(--tg-theme-secondary-bg-color, #f2f2f7);
+            /* Переменные темы с поддержкой OKLCH / Telegram Native */
+            --bg-primary: var(--tg-theme-bg-color, #ffffff);
+            --bg-secondary: var(--tg-theme-secondary-bg-color, #f4f4f7);
+            --bg-card: var(--tg-theme-secondary-bg-color, #ffffff);
+            --text-primary: var(--tg-theme-text-color, #1c1c1e);
+            --text-secondary: var(--tg-theme-hint-color, #8e8e93);
+            --accent: var(--tg-theme-button-color, #007aff);
+            --accent-text: var(--tg-theme-button-text-color, #ffffff);
+            --accent-light: rgba(0, 122, 255, 0.12);
             --border-color: rgba(60, 60, 67, 0.12);
             --danger-color: #ff3b30;
+            --danger-light: rgba(255, 59, 48, 0.12);
+            --success-color: #34c759;
+            --success-light: rgba(52, 199, 89, 0.12);
+            --radius-outer: 16px;
+            --radius-inner: 10px;
+            --radius-btn: 12px;
+            --shadow-subtle: 0 4px 16px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+            --shadow-card: 0 6px 20px rgba(0, 0, 0, 0.06);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-primary: var(--tg-theme-bg-color, #1c1c1e);
+                --bg-secondary: var(--tg-theme-secondary-bg-color, #2c2c2e);
+                --bg-card: #2c2c2e;
+                --text-primary: var(--tg-theme-text-color, #f2f2f7);
+                --text-secondary: var(--tg-theme-hint-color, #98989d);
+                --border-color: rgba(255, 255, 255, 0.12);
+            }
         }
 
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             -webkit-tap-highlight-color: transparent;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
 
         body {
-            background-color: var(--bg-color);
-            color: var(--text-color);
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
             padding: 16px;
-            padding-bottom: 90px;
+            padding-bottom: 100px;
+            min-height: 100vh;
         }
 
+        /* Заголовок */
         .app-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             margin-bottom: 16px;
         }
 
-        .app-header h1 {
+        .header-title h1 {
             font-size: 22px;
             font-weight: 700;
             letter-spacing: -0.4px;
+            text-wrap: balance;
         }
 
-        .app-header p {
+        .header-title p {
             font-size: 13px;
-            color: var(--hint-color);
+            color: var(--text-secondary);
             margin-top: 2px;
+            font-variant-numeric: tabular-nums;
         }
 
-        /* Нативный Segmented Control (Табы) */
+        .user-badge {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* Табы (Segmented Control) */
         .tabs-nav {
             display: flex;
-            background: var(--secondary-bg-color);
-            padding: 3px;
-            border-radius: 10px;
+            background: var(--bg-secondary);
+            padding: 4px;
+            border-radius: var(--radius-outer);
             margin-bottom: 16px;
             border: 1px solid var(--border-color);
             overflow-x: auto;
+            gap: 4px;
         }
 
         .tab-btn {
             flex: 1;
-            padding: 8px 10px;
-            border-radius: 8px;
+            padding: 9px 12px;
+            border-radius: calc(var(--radius-outer) - 4px);
             border: none;
             background: transparent;
-            color: var(--hint-color);
-            font-size: 12px;
+            color: var(--text-secondary);
+            font-size: 13px;
             font-weight: 600;
             cursor: pointer;
             white-space: nowrap;
-            transition: all 0.2s ease;
+            transition: background-color 0.2s ease, color 0.2s ease, transform 0.15s cubic-bezier(0.2, 0, 0, 1);
+            min-height: 38px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .tab-btn:active {
+            transform: scale(0.96);
         }
 
         .tab-btn.active {
-            background: var(--bg-color);
-            color: var(--text-color);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+
+        .tab-btn.admin-tab {
+            color: #ff9500;
+            display: none; /* Покажется если OWNER */
+        }
+        .tab-btn.admin-tab.active {
+            background: rgba(255, 149, 0, 0.15);
+            color: #ff9500;
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.2s ease-out;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
         /* Поиск */
@@ -88,13 +163,19 @@
 
         .search-input {
             width: 100%;
-            padding: 10px 14px 10px 36px;
-            border-radius: 10px;
-            background: var(--secondary-bg-color);
+            padding: 12px 14px 12px 38px;
+            border-radius: var(--radius-btn);
+            background: var(--bg-secondary);
             border: 1px solid var(--border-color);
-            color: var(--text-color);
-            font-size: 14px;
+            color: var(--text-primary);
+            font-size: 16px; /* 16px предотвращает автозум на iOS */
             outline: none;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .search-input:focus-visible {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-light);
         }
 
         .search-icon {
@@ -102,18 +183,11 @@
             left: 12px;
             top: 50%;
             transform: translateY(-50%);
-            font-size: 14px;
-            color: var(--hint-color);
+            font-size: 15px;
+            color: var(--text-secondary);
         }
 
-        .tab-content {
-            display: none;
-        }
-
-        .tab-content.active {
-            display: block;
-        }
-
+        /* Карточка Роли */
         .roles-container {
             display: flex;
             flex-direction: column;
@@ -121,13 +195,14 @@
         }
 
         .role-card {
-            background: var(--secondary-bg-color);
-            border-radius: 14px;
+            background: var(--bg-card);
+            border-radius: var(--radius-outer);
             padding: 16px;
             display: flex;
             flex-direction: column;
-            gap: 12px;
+            gap: 14px;
             border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-subtle);
         }
 
         .role-header {
@@ -139,38 +214,39 @@
         .role-title {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 12px;
         }
 
         .role-icon {
-            width: 38px;
-            height: 38px;
-            border-radius: 10px;
-            background: var(--bg-color);
+            width: 42px;
+            height: 42px;
+            border-radius: var(--radius-inner);
+            background: var(--bg-secondary);
             border: 1px solid var(--border-color);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 20px;
+            font-size: 22px;
         }
 
         .role-name {
             font-size: 17px;
-            font-weight: 600;
+            font-weight: 650;
             letter-spacing: -0.3px;
         }
 
         .count-pill {
             font-size: 12px;
-            color: var(--hint-color);
-            font-weight: 500;
-            background: var(--bg-color);
-            padding: 4px 10px;
-            border-radius: 12px;
+            color: var(--text-secondary);
+            font-weight: 600;
+            background: var(--bg-secondary);
+            padding: 5px 12px;
+            border-radius: 20px;
             border: 1px solid var(--border-color);
+            font-variant-numeric: tabular-nums;
         }
 
-        /* Чипы участников */
+        /* Участники */
         .members-grid {
             display: flex;
             flex-wrap: wrap;
@@ -178,27 +254,27 @@
         }
 
         .member-chip {
-            background: var(--bg-color);
+            background: var(--bg-secondary);
             border: 1px solid var(--border-color);
-            padding: 5px 10px;
+            padding: 6px 10px;
             border-radius: 8px;
             font-size: 13px;
-            color: var(--text-color);
+            color: var(--text-primary);
             display: inline-flex;
             align-items: center;
-            gap: 4px;
+            gap: 5px;
         }
 
         .member-chip.current-user {
-            background: rgba(0, 122, 255, 0.1);
+            background: var(--accent-light);
             border-color: rgba(0, 122, 255, 0.3);
-            color: var(--link-color);
+            color: var(--accent);
             font-weight: 600;
         }
 
         .empty-members {
             font-size: 13px;
-            color: var(--hint-color);
+            color: var(--text-secondary);
             font-style: italic;
         }
 
@@ -206,13 +282,14 @@
         .role-actions {
             display: flex;
             gap: 8px;
-            margin-top: 4px;
+            margin-top: 2px;
         }
 
         .btn {
             flex: 1;
+            min-height: 42px;
             padding: 10px 14px;
-            border-radius: 10px;
+            border-radius: var(--radius-btn);
             border: none;
             font-size: 14px;
             font-weight: 600;
@@ -220,81 +297,106 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 4px;
+            gap: 6px;
             outline: none;
-            transition: opacity 0.15s ease;
+            transition: background-color 0.2s ease, opacity 0.15s ease, transform 0.15s cubic-bezier(0.2, 0, 0, 1);
         }
 
         .btn:active {
-            opacity: 0.7;
+            transform: scale(0.96);
+            opacity: 0.85;
         }
 
-        .btn-join {
-            background-color: var(--button-color);
-            color: var(--button-text-color);
+        .btn:focus-visible {
+            box-shadow: 0 0 0 3px var(--accent-light);
         }
 
-        .btn-leave {
-            background-color: rgba(142, 142, 147, 0.18);
-            color: var(--text-color);
+        .btn-primary {
+            background-color: var(--accent);
+            color: var(--accent-text);
         }
 
-        .btn-share {
-            background-color: rgba(0, 122, 255, 0.12);
-            color: var(--link-color);
+        .btn-secondary {
+            background-color: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-icon {
+            background-color: var(--accent-light);
+            color: var(--accent);
             flex: initial;
-            padding: 10px 12px;
+            width: 42px;
+            padding: 0;
         }
 
-        .btn-delete {
-            background-color: rgba(255, 59, 48, 0.12);
+        .btn-danger {
+            background-color: var(--danger-light);
             color: var(--danger-color);
             flex: initial;
-            padding: 10px 12px;
+            width: 42px;
+            padding: 0;
         }
 
-        /* Выбор Эмодзи для Роли */
+        /* Эмодзи пикер */
         .emoji-picker {
             display: flex;
             gap: 8px;
             margin-bottom: 14px;
             overflow-x: auto;
-            padding-bottom: 4px;
+            padding: 4px 0;
         }
 
         .emoji-option {
-            width: 38px;
-            height: 38px;
-            border-radius: 10px;
-            background: var(--bg-color);
+            width: 42px;
+            height: 42px;
+            border-radius: var(--radius-inner);
+            background: var(--bg-secondary);
             border: 1px solid var(--border-color);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 18px;
+            font-size: 20px;
             cursor: pointer;
             flex-shrink: 0;
-            transition: transform 0.15s ease;
+            transition: transform 0.15s ease, border-color 0.2s ease;
         }
 
         .emoji-option.selected {
-            border-color: var(--button-color);
-            background: rgba(0, 122, 255, 0.12);
-            transform: scale(1.1);
+            border-color: var(--accent);
+            background: var(--accent-light);
+            transform: scale(1.08);
         }
 
-        /* Карточка создания роли */
-        .create-card {
-            background: var(--secondary-bg-color);
-            border-radius: 14px;
-            padding: 16px;
+        /* Формы и карточки */
+        .card {
+            background: var(--bg-card);
+            border-radius: var(--radius-outer);
+            padding: 18px;
             border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-subtle);
+            margin-bottom: 16px;
         }
 
-        .create-card h2 {
-            font-size: 15px;
-            font-weight: 600;
+        .card h2 {
+            font-size: 16px;
+            font-weight: 700;
             margin-bottom: 12px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+
+        .form-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
         }
 
         .form-row {
@@ -302,18 +404,70 @@
             gap: 8px;
         }
 
-        .create-input {
-            flex: 1;
-            padding: 11px 14px;
-            border-radius: 10px;
+        .input-field, .textarea-field {
+            width: 100%;
+            padding: 12px 14px;
+            border-radius: var(--radius-btn);
             border: 1px solid var(--border-color);
-            background: var(--bg-color);
-            color: var(--text-color);
-            font-size: 15px;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            font-size: 16px; /* 16px для mobile */
             outline: none;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }
 
-        /* Статистика & Лог */
+        .textarea-field {
+            min-height: 90px;
+            resize: vertical;
+            font-family: inherit;
+        }
+
+        .input-field:focus-visible, .textarea-field:focus-visible {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-light);
+        }
+
+        /* Админка стили */
+        .admin-badge {
+            background: rgba(255, 149, 0, 0.15);
+            color: #ff9500;
+            border: 1px solid rgba(255, 149, 0, 0.3);
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            margin-bottom: 12px;
+        }
+
+        .preset-chips {
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            padding-bottom: 6px;
+            margin-bottom: 10px;
+        }
+
+        .preset-chip {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-primary);
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background-color 0.2s ease, transform 0.15s ease;
+        }
+
+        .preset-chip:active {
+            transform: scale(0.95);
+        }
+
+        /* Статистика */
         .stats-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -322,53 +476,40 @@
         }
 
         .stat-card {
-            background: var(--secondary-bg-color);
-            border-radius: 14px;
+            background: var(--bg-card);
+            border-radius: var(--radius-outer);
             padding: 16px;
             border: 1px solid var(--border-color);
             text-align: center;
+            box-shadow: var(--shadow-subtle);
         }
 
         .stat-number {
-            font-size: 28px;
-            font-weight: 700;
-            color: var(--button-color);
+            font-size: 26px;
+            font-weight: 800;
+            color: var(--accent);
             margin-top: 4px;
+            font-variant-numeric: tabular-nums;
         }
 
         .stat-label {
-            font-size: 12px;
-            color: var(--hint-color);
-            font-weight: 500;
-            text-transform: uppercase;
-        }
-
-        .roster-card {
-            background: var(--secondary-bg-color);
-            border-radius: 14px;
-            padding: 16px;
-            border: 1px solid var(--border-color);
-            margin-bottom: 16px;
-        }
-
-        .roster-card h3 {
-            font-size: 13px;
+            font-size: 11px;
+            color: var(--text-secondary);
             font-weight: 600;
-            color: var(--hint-color);
             text-transform: uppercase;
             letter-spacing: 0.4px;
-            margin-bottom: 12px;
         }
 
-        .user-row {
+        /* Списки */
+        .user-row, .log-item {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 10px 0;
+            padding: 12px 0;
             border-bottom: 1px solid var(--border-color);
         }
 
-        .user-row:last-child {
+        .user-row:last-child, .log-item:last-child {
             border-bottom: none;
         }
 
@@ -380,81 +521,40 @@
             font-weight: 600;
         }
 
-        .user-roles {
-            display: flex;
-            gap: 4px;
-            flex-wrap: wrap;
-        }
-
         .role-tag {
-            background: var(--bg-color);
+            background: var(--bg-secondary);
             border: 1px solid var(--border-color);
             font-size: 11px;
-            padding: 2px 6px;
+            padding: 3px 8px;
             border-radius: 6px;
-            color: var(--hint-color);
+            color: var(--text-secondary);
         }
 
-        /* Элементы Лога */
-        .log-item {
-            padding: 10px 0;
-            border-bottom: 1px solid var(--border-color);
-            font-size: 13px;
-        }
-
-        .log-item:last-child {
-            border-bottom: none;
-        }
-
-        .log-header {
-            display: flex;
-            justify-content: space-between;
-            font-weight: 600;
-            color: var(--text-color);
-        }
-
-        .log-time {
-            font-size: 11px;
-            color: var(--hint-color);
-            font-weight: 400;
-        }
-
-        .log-details {
-            font-size: 12px;
-            color: var(--hint-color);
-            margin-top: 2px;
-        }
-
-        /* Модальное окно выбора участников */
+        /* Модалка */
         .modal-backdrop {
             position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.4);
-            backdrop-filter: blur(4px);
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.45);
+            backdrop-filter: blur(6px);
             z-index: 200;
             display: none;
             align-items: flex-end;
         }
 
-        .modal-backdrop.open {
-            display: flex;
-        }
+        .modal-backdrop.open { display: flex; }
 
         .modal-sheet {
-            background: var(--bg-color);
-            border-top-left-radius: 20px;
-            border-top-right-radius: 20px;
+            background: var(--bg-primary);
+            border-top-left-radius: 24px;
+            border-top-right-radius: 24px;
             width: 100%;
             max-height: 85vh;
-            padding: 20px 16px 30px 16px;
+            padding: 20px 16px 34px 16px;
             display: flex;
             flex-direction: column;
             gap: 14px;
-            box-shadow: 0 -4px 20px rgba(0,0,0,0.15);
-            animation: slideUp 0.25s ease-out;
+            box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.2);
+            animation: slideUp 0.25s cubic-bezier(0.2, 0, 0, 1);
         }
 
         @keyframes slideUp {
@@ -468,20 +568,17 @@
             align-items: center;
         }
 
-        .modal-title {
-            font-size: 18px;
-            font-weight: 700;
-        }
+        .modal-title { font-size: 18px; font-weight: 700; }
 
         .close-btn {
-            background: var(--secondary-bg-color);
+            background: var(--bg-secondary);
             border: none;
-            width: 28px;
-            height: 28px;
+            width: 32px;
+            height: 32px;
             border-radius: 50%;
             font-size: 14px;
             font-weight: 700;
-            color: var(--hint-color);
+            color: var(--text-secondary);
             cursor: pointer;
         }
 
@@ -493,29 +590,21 @@
             gap: 8px;
         }
 
-        .member-select-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: var(--secondary-bg-color);
-            padding: 10px 12px;
-            border-radius: 10px;
-            border: 1px solid var(--border-color);
-        }
-
+        /* Тоаст */
         .status-toast {
             position: fixed;
-            bottom: 20px;
+            bottom: 24px;
             left: 50%;
             transform: translateX(-50%) translateY(100px);
-            background: var(--text-color);
-            color: var(--bg-color);
-            padding: 10px 20px;
-            border-radius: 20px;
-            font-size: 13px;
+            background: var(--text-primary);
+            color: var(--bg-primary);
+            padding: 12px 22px;
+            border-radius: 30px;
+            font-size: 14px;
             font-weight: 600;
-            transition: transform 0.25s ease;
+            transition: transform 0.25s cubic-bezier(0.2, 0, 0, 1);
             z-index: 300;
+            box-shadow: var(--shadow-card);
         }
 
         .status-toast.visible {
@@ -525,40 +614,47 @@
         .loader {
             text-align: center;
             padding: 40px;
-            color: var(--hint-color);
+            color: var(--text-secondary);
             font-size: 14px;
         }
     </style>
 </head>
 <body>
 
+    <!-- Шапка -->
     <div class="app-header">
-        <h1>Панель Ролей</h1>
-        <p id="chat-info">Синхронизация...</p>
+        <div class="header-title">
+            <h1>Teger Roles</h1>
+            <p id="chat-info">Синхронизация...</p>
+        </div>
+        <div class="user-badge" id="user-badge">
+            👤 <span id="user-name">Гость</span>
+        </div>
     </div>
 
-    <!-- Заботки / Табы -->
+    <!-- Главные Табы (Включая секретную админку) -->
     <div class="tabs-nav">
         <button class="tab-btn active" onclick="switchTab('roles', this)">🛡️ Роли</button>
         <button class="tab-btn" onclick="switchTab('create', this)">➕ Создать</button>
         <button class="tab-btn" onclick="switchTab('stats', this)">📊 Состав</button>
         <button class="tab-btn" onclick="switchTab('logs', this)">📜 История</button>
+        <button class="tab-btn admin-tab" id="admin-tab-btn" onclick="switchTab('admin', this)">⚡ Админка</button>
     </div>
 
-    <!-- ТАБ 1: Список ролей -->
+    <!-- ТАБ 1: Роли -->
     <div id="tab-roles" class="tab-content active">
         <div class="search-box">
             <span class="search-icon">🔍</span>
-            <input type="text" id="search-input" class="search-input" placeholder="Поиск по названию..." oninput="filterRoles()">
+            <input type="text" id="search-input" class="search-input" placeholder="Поиск роли по названию..." oninput="filterRoles()">
         </div>
         <div id="roles-list" class="roles-container">
-            <div class="loader">Загрузка...</div>
+            <div class="loader">Загрузка ролей...</div>
         </div>
     </div>
 
-    <!-- ТАБ 2: Создание роли с выбором Эмодзи -->
+    <!-- ТАБ 2: Создать роль -->
     <div id="tab-create" class="tab-content">
-        <div class="create-card">
+        <div class="card">
             <h2>Создание новой роли</h2>
             <div class="emoji-picker" id="emoji-picker">
                 <div class="emoji-option selected" onclick="selectEmoji(this, '🛡️')">🛡️</div>
@@ -573,13 +669,13 @@
             </div>
 
             <div class="form-row">
-                <input type="text" id="new-role-input" class="create-input" placeholder="Название роли (например: dev)">
-                <button class="btn btn-join" style="flex: initial;" onclick="createNewRole()">Создать</button>
+                <input type="text" id="new-role-input" class="input-field" placeholder="Название роли (например: dev)">
+                <button class="btn btn-primary" style="flex: initial; min-width: 100px;" onclick="createNewRole()">Создать</button>
             </div>
         </div>
     </div>
 
-    <!-- ТАБ 3: Список всех участников группы -->
+    <!-- ТАБ 3: Состав -->
     <div id="tab-stats" class="tab-content">
         <div class="stats-grid">
             <div class="stat-card">
@@ -592,25 +688,98 @@
             </div>
         </div>
 
-        <div class="roster-card">
-            <h3>Участники группы и их роли</h3>
+        <div class="card">
+            <h2>Участники группы</h2>
             <div id="roster-list">
                 <div class="loader">Загрузка состава...</div>
             </div>
         </div>
     </div>
 
-    <!-- ТАБ 4: История изменений (Audit Log) -->
+    <!-- ТАБ 4: История -->
     <div id="tab-logs" class="tab-content">
-        <div class="roster-card">
-            <h3>📜 История изменений чата</h3>
+        <div class="card">
+            <h2>📜 История действий чата</h2>
             <div id="logs-list">
                 <div class="loader">Загрузка истории...</div>
             </div>
         </div>
     </div>
 
-    <!-- МОДАЛЬНОЕ ОКНО Выбора участников для роли -->
+    <!-- ТАБ 5: Секретная АДМИНКА (Только для OWNER_ID) -->
+    <div id="tab-admin" class="tab-content">
+        <div class="admin-badge">👑 Панель Супер-Администратора (Владелец)</div>
+        
+        <!-- Функция /send -->
+        <div class="card">
+            <h2>📢 Отправка сообщений (/send)</h2>
+            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px;">
+                Отправка любого HTML-сообщения в любой чат прямо от лица бота.
+            </p>
+
+            <!-- Быстрые шаблоны -->
+            <div class="preset-chips">
+                <div class="preset-chip" onclick="applyPreset('birthday')">🎂 Поздравление с ДР</div>
+                <div class="preset-chip" onclick="applyPreset('alert')">🚨 Срочный анонс</div>
+                <div class="preset-chip" onclick="applyPreset('info')">💡 Объявление</div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Chat ID группы / канала / юзера</label>
+                <input type="text" id="admin-chat-id" class="input-field" placeholder="-1001234567890">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Текст сообщения (HTML форматирование)</label>
+                <textarea id="admin-msg-text" class="textarea-field" placeholder="🎉 <b>Привет!</b> Сообщение..."></textarea>
+            </div>
+
+            <button class="btn btn-primary" id="admin-send-btn" style="width: 100%;" onclick="sendAdminMessage()">
+                🚀 Отправить сообщение
+            </button>
+        </div>
+
+        <!-- Глобальная статистика системы -->
+        <div class="card">
+            <h2>📊 Глобальная система Teger</h2>
+            <div class="stats-grid" style="margin-bottom: 0;">
+                <div class="stat-card">
+                    <div class="stat-label">Всего чатов</div>
+                    <div id="admin-stat-chats" class="stat-number">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Всего ролей БД</div>
+                    <div id="admin-stat-roles" class="stat-number">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Юзеров в базе</div>
+                    <div id="admin-stat-users" class="stat-number">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Записей логов</div>
+                    <div id="admin-stat-logs" class="stat-number">-</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Инфраструктура для будущих админ-функций -->
+        <div class="card">
+            <h2>🔮 Будущие функции (Админ-модули)</h2>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                <div style="background: var(--bg-secondary); padding: 12px; border-radius: 10px; border: 1px solid var(--border-color); font-size: 13px;">
+                    <b>📢 Глобальная рассылка</b> — отправка сообщения во все чаты где есть бот <i>(Готово к подключению)</i>
+                </div>
+                <div style="background: var(--bg-secondary); padding: 12px; border-radius: 10px; border: 1px solid var(--border-color); font-size: 13px;">
+                    <b>🧹 Очистка неактивных ролей</b> — автоматическая архивация <i>(Готово к подключению)</i>
+                </div>
+                <div style="background: var(--bg-secondary); padding: 12px; border-radius: 10px; border: 1px solid var(--border-color); font-size: 13px;">
+                    <b>🔒 Глобальный черный список</b> — блокировка нарушителей <i>(Готово к подключению)</i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно участников -->
     <div id="modal-backdrop" class="modal-backdrop" onclick="closeMemberModal(event)">
         <div class="modal-sheet" onclick="event.stopPropagation()">
             <div class="modal-header">
@@ -619,8 +788,8 @@
             </div>
             
             <div class="form-row">
-                <input type="text" id="manual-user-input" class="create-input" placeholder="Добавить @username вручную">
-                <button class="btn btn-join" style="flex: initial;" onclick="addManualUser()">+ Добавить</button>
+                <input type="text" id="manual-user-input" class="input-field" placeholder="Добавить @username вручную">
+                <button class="btn btn-primary" style="flex: initial;" onclick="addManualUser()">+ Добавить</button>
             </div>
 
             <div class="search-box" style="margin-bottom: 0;">
@@ -648,22 +817,26 @@
         let chatMembersCache = [];
         let activeModalRole = null;
         let selectedRoleEmoji = '🛡️';
+        let isOwnerUser = false;
 
+        document.getElementById('user-name').textContent = currentUser.first_name || "Гость";
         document.getElementById('chat-info').textContent = chatId 
             ? `Группа ID: ${chatId}` 
             : `Пользователь: ${currentUser.first_name}`;
 
+        if (chatId) {
+            document.getElementById('admin-chat-id').value = chatId;
+        }
+
         function triggerHaptic(type = 'light') {
-            if (tg.HapticFeedback) {
-                tg.HapticFeedback.impactOccurred(type);
-            }
+            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred(type);
         }
 
         function showToast(text) {
             const toast = document.getElementById('toast');
             toast.textContent = text;
             toast.classList.add('visible');
-            setTimeout(() => { toast.classList.remove('visible'); }, 2000);
+            setTimeout(() => { toast.classList.remove('visible'); }, 2500);
         }
 
         function selectEmoji(el, emoji) {
@@ -687,6 +860,23 @@
                 fetchChatMembers();
             } else if (tabName === 'logs') {
                 fetchAuditLogs();
+            } else if (tabName === 'admin') {
+                fetchAdminStats();
+            }
+        }
+
+        // Проверка прав владельца для отображения секретной админки
+        async function checkOwnerStatus() {
+            if (!currentUser.id) return;
+            try {
+                const res = await fetch(`/api/admin/check?user_id=${currentUser.id}`);
+                const data = await res.json();
+                if (data.is_owner) {
+                    isOwnerUser = true;
+                    document.getElementById('admin-tab-btn').style.display = 'flex';
+                }
+            } catch (e) {
+                console.error("Ошибка проверки владельца:", e);
             }
         }
 
@@ -728,7 +918,7 @@
                 chatMembersCache = data.members || [];
                 renderRoster(chatMembersCache);
             } catch (e) {
-                console.error("Ошибка загрузки участников:", e);
+                console.error("Ошибка участников:", e);
             }
         }
 
@@ -743,6 +933,84 @@
             }
         }
 
+        async function fetchAdminStats() {
+            if (!isOwnerUser) return;
+            try {
+                const res = await fetch(`/api/admin/stats?user_id=${currentUser.id}`);
+                const data = await res.json();
+                if (data.stats) {
+                    document.getElementById('admin-stat-chats').textContent = data.stats.chats;
+                    document.getElementById('admin-stat-roles').textContent = data.stats.roles;
+                    document.getElementById('admin-stat-users').textContent = data.stats.users;
+                    document.getElementById('admin-stat-logs').textContent = data.stats.logs;
+                }
+            } catch (e) {
+                console.error("Ошибка админ статистики:", e);
+            }
+        }
+
+        function applyPreset(type) {
+            triggerHaptic('light');
+            const targetChat = document.getElementById('admin-chat-id').value || chatId || '-1001750819389';
+            document.getElementById('admin-chat-id').value = targetChat;
+
+            if (type === 'birthday') {
+                document.getElementById('admin-msg-text').value = 
+                    `🎉 <b>ВНИМАНИЕ! СПЕЦИАЛЬНОЕ УВЕДОМЛЕНИЕ!</b> 🚨\n\n` +
+                    `Сегодня свой праздник отмечает <b>Ваня</b>! 👑\n\n` +
+                    `🎂 <b>Ваня, с Днём Рождения!</b> 🥳\n` +
+                    `Желаем пинга в 1 мс, непрерывного аптайма, железного здоровья и побед!\n\n` +
+                    `🛡️ <i>Все роли чата призывают: <b>УРА!</b></i> 🎉🎉🎉`;
+            } else if (type === 'alert') {
+                document.getElementById('admin-msg-text').value = 
+                    `🚨 <b>СРОЧНОЕ ОБЪЯВЛЕНИЕ АДМИНИСТРАЦИИ!</b>\n\n` +
+                    `Пожалуйста, обратите внимание на новые правила группы.`;
+            } else if (type === 'info') {
+                document.getElementById('admin-msg-text').value = 
+                    `💡 <b>Информационное сообщение</b>\n\n` +
+                    `Система работает в штатном режиме.`;
+            }
+        }
+
+        async function sendAdminMessage() {
+            const targetChatId = document.getElementById('admin-chat-id').value.trim();
+            const messageText = document.getElementById('admin-msg-text').value.trim();
+
+            if (!targetChatId || !messageText) {
+                showToast("Заполните Chat ID и Текст");
+                return;
+            }
+
+            const btn = document.getElementById('admin-send-btn');
+            btn.disabled = true;
+            btn.textContent = "⏳ Отправка...";
+
+            try {
+                const res = await fetch('/api/admin/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_id: currentUser.id,
+                        chat_id: targetChatId,
+                        message: messageText
+                    })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    triggerHaptic('medium');
+                    showToast("✅ Сообщение успешно отправлено!");
+                    document.getElementById('admin-msg-text').value = '';
+                } else {
+                    showToast(data.error || "Ошибка отправки");
+                }
+            } catch (e) {
+                showToast("Ошибка подключения к серверу");
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "🚀 Отправить сообщение";
+            }
+        }
+
         function renderAuditLogs(logs) {
             const container = document.getElementById('logs-list');
             if (logs.length === 0) {
@@ -752,11 +1020,11 @@
 
             container.innerHTML = logs.map(l => `
                 <div class="log-item">
-                    <div class="log-header">
+                    <div style="display:flex; justify-content:space-between; width:100%; font-weight:600;">
                         <span>${escapeHtml(l.username)} ➔ ${escapeHtml(l.action)}</span>
-                        <span class="log-time">${escapeHtml(l.time)}</span>
+                        <span style="font-size:11px; color:var(--text-secondary);">${escapeHtml(l.time)}</span>
                     </div>
-                    <div class="log-details">${escapeHtml(l.details || '')}</div>
+                    <div style="font-size:12px; color:var(--text-secondary); margin-top:2px;">${escapeHtml(l.details || '')}</div>
                 </div>
             `).join('');
         }
@@ -776,7 +1044,7 @@
                 return `
                     <div class="user-row">
                         <div class="user-info">👤 ${escapeHtml(m.username)}</div>
-                        <div class="user-roles">${rolesBadges}</div>
+                        <div>${rolesBadges}</div>
                     </div>
                 `;
             }).join('');
@@ -822,12 +1090,12 @@
                         </div>
                         <div class="role-actions">
                             ${isMember 
-                                ? `<button class="btn btn-leave" onclick="leaveRole('${role.name}')">Выйти</button>`
-                                : `<button class="btn btn-join" onclick="joinRole('${role.name}')">Вступить</button>`
+                                ? `<button class="btn btn-secondary" onclick="leaveRole('${role.name}')">Выйти</button>`
+                                : `<button class="btn btn-primary" onclick="joinRole('${role.name}')">Вступить</button>`
                             }
-                            <button class="btn btn-share" onclick="openMemberModal('${role.name}')" title="Управление участниками">👤+</button>
-                            <button class="btn btn-share" onclick="shareRoleLink('${role.name}')" title="Ссылка">🔗</button>
-                            <button class="btn btn-delete" onclick="deleteRole('${role.name}')" title="Удалить">🗑</button>
+                            <button class="btn btn-icon" onclick="openMemberModal('${role.name}')" title="Участники">👤+</button>
+                            <button class="btn btn-icon" onclick="shareRoleLink('${role.name}')" title="Ссылка">🔗</button>
+                            <button class="btn btn-danger" onclick="deleteRole('${role.name}')" title="Удалить">🗑</button>
                         </div>
                     </div>
                 `;
@@ -871,11 +1139,11 @@
             container.innerHTML = members.map(m => {
                 const inRole = (m.user_id && roleMemberIds.includes(m.user_id)) || (m.username && roleMemberUsernames.includes(m.username.toLowerCase()));
                 return `
-                    <div class="member-select-row">
+                    <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-secondary); padding:10px 12px; border-radius:10px; border:1px solid var(--border-color);">
                         <div class="user-info">👤 ${escapeHtml(m.username)}</div>
                         ${inRole 
-                            ? `<button class="btn btn-leave" style="flex: initial;" onclick="toggleRoleUser('${activeModalRole}', ${m.user_id}, '${escapeHtml(m.username)}', false)">✅ В роли</button>`
-                            : `<button class="btn btn-join" style="flex: initial;" onclick="toggleRoleUser('${activeModalRole}', ${m.user_id}, '${escapeHtml(m.username)}', true)">+ Добавить</button>`
+                            ? `<button class="btn btn-secondary" style="flex:initial; min-height:36px; padding:6px 12px;" onclick="toggleRoleUser('${activeModalRole}', ${m.user_id}, '${escapeHtml(m.username)}', false)">✅ В роли</button>`
+                            : `<button class="btn btn-primary" style="flex:initial; min-height:36px; padding:6px 12px;" onclick="toggleRoleUser('${activeModalRole}', ${m.user_id}, '${escapeHtml(m.username)}', true)">+ Добавить</button>`
                         }
                     </div>
                 `;
@@ -1029,9 +1297,11 @@
         }
 
         function escapeHtml(text) {
-            return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            return (text || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         }
 
+        // Запуск проверки прав и первой загрузки
+        checkOwnerStatus();
         fetchRoles();
     </script>
 </body>

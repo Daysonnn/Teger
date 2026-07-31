@@ -3,6 +3,15 @@ import logging
 from aiohttp import web
 import database as db
 
+def check_is_owner(user_id: int | str | None) -> bool:
+    owner_id_env = os.getenv("OWNER_ID")
+    if not owner_id_env or not user_id:
+        return False
+    try:
+        return int(user_id) == int(owner_id_env.strip())
+    except (ValueError, TypeError):
+        return False
+
 async def handle_get_roles(request: web.Request):
     chat_id = request.query.get("chat_id")
     if not chat_id:
@@ -138,6 +147,70 @@ async def handle_get_audit_logs(request: web.Request):
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
 
+async def handle_admin_check(request: web.Request):
+    user_id = request.query.get("user_id")
+    is_owner = check_is_owner(user_id)
+    return web.json_response({
+        "is_owner": is_owner
+    })
+
+async def handle_admin_send(request: web.Request):
+    try:
+        data = await request.json()
+        user_id = data.get("user_id")
+        target_chat_id = data.get("chat_id")
+        message_text = data.get("message")
+
+        if not check_is_owner(user_id):
+            return web.json_response({"error": "⛔ Доступ запрещен. Только для владельца бота."}, status=403)
+
+        if not target_chat_id or not message_text:
+            return web.json_response({"error": "Укажите Chat ID и текст сообщения"}, status=400)
+
+        token = os.getenv("TOKEN")
+        if not token:
+            return web.json_response({"error": "TOKEN бота не найден в настройках"}, status=500)
+
+        from aiogram import Bot
+        bot = Bot(token=token)
+        await bot.send_message(chat_id=target_chat_id, text=message_text, parse_mode="HTML")
+        await bot.session.close()
+        
+        return web.json_response({"status": "success", "message": "Сообщение успешно отправлено в чат!"})
+    except Exception as e:
+        logging.error(f"Error in admin send: {e}")
+        return web.json_response({"error": f"Ошибка отправки: {str(e)}"}, status=500)
+
+async def handle_admin_stats(request: web.Request):
+    user_id = request.query.get("user_id")
+    if not check_is_owner(user_id):
+        return web.json_response({"error": "Доступ запрещен"}, status=403)
+    
+    try:
+        async with db.get_db() as conn:
+            c1 = await conn.execute("SELECT COUNT(*) FROM roles")
+            total_roles = (await c1.fetchone())[0]
+            
+            c2 = await conn.execute("SELECT COUNT(DISTINCT chat_id) FROM roles")
+            total_chats = (await c2.fetchone())[0]
+            
+            c3 = await conn.execute("SELECT COUNT(DISTINCT user_id) FROM members")
+            total_users = (await c3.fetchone())[0]
+            
+            c4 = await conn.execute("SELECT COUNT(*) FROM audit_logs")
+            total_logs = (await c4.fetchone())[0]
+
+        return web.json_response({
+            "stats": {
+                "roles": total_roles,
+                "chats": total_chats,
+                "users": total_users,
+                "logs": total_logs
+            }
+        })
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
 async def handle_index(request: web.Request):
     return web.FileResponse(os.path.join(os.path.dirname(__file__), "web", "index.html"))
 
@@ -151,6 +224,11 @@ def create_web_app() -> web.Application:
     app.router.add_post("/api/leave", handle_leave_role)
     app.router.add_post("/api/create", handle_create_role)
     app.router.add_post("/api/delete", handle_delete_role)
+    
+    # Admin routes
+    app.router.add_get("/api/admin/check", handle_admin_check)
+    app.router.add_post("/api/admin/send", handle_admin_send)
+    app.router.add_get("/api/admin/stats", handle_admin_stats)
     
     web_dir = os.path.join(os.path.dirname(__file__), "web")
     assets_dir = os.path.join(os.path.dirname(__file__), "assets")
