@@ -66,6 +66,8 @@ class EditMessageTextRich(TelegramMethod[Message | bool]):
     rich_message: dict | None = None
     reply_markup: InlineKeyboardMarkup | None = None
 
+from aiogram.exceptions import TelegramBadRequest
+
 async def edit_smart_message(
     bot: Bot, 
     chat_id: int, 
@@ -83,16 +85,25 @@ async def edit_smart_message(
                 rich_message={"blocks": rich_blocks},
                 reply_markup=reply_markup
             ))
+        except TelegramBadRequest as e:
+            if "message is not modified" in str(e).lower():
+                return True
+            logging.error(f"EditMessageTextRich bad request: {e}")
         except Exception as e:
             logging.error(f"EditMessageTextRich error: {e}")
 
-    return await bot.edit_message_text(
-        chat_id=chat_id,
-        message_id=message_id,
-        text=html_text,
-        parse_mode=ParseMode.HTML,
-        reply_markup=reply_markup
-    )
+    try:
+        return await bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=html_text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e).lower():
+            return True
+        raise
 
 def get_main_menu_keyboard(chat_id: int, is_private: bool = False) -> InlineKeyboardMarkup:
     """Главное меню с кнопкой Mini App."""
