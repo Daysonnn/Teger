@@ -55,6 +55,45 @@ async def send_smart_message(
         reply_to_message_id=reply_to_message_id
     )
 
+class EditMessageTextRich(TelegramMethod[Message | bool]):
+    """Кастомный метод Telegram Bot API 10.1+ для редактирования сообщений с Rich Messages."""
+    __returning__ = Message | bool
+    __api_method__ = "editMessageText"
+
+    chat_id: int | str | None = None
+    message_id: int | None = None
+    inline_message_id: str | None = None
+    rich_message: dict | None = None
+    reply_markup: InlineKeyboardMarkup | None = None
+
+async def edit_smart_message(
+    bot: Bot, 
+    chat_id: int, 
+    message_id: int,
+    html_text: str, 
+    reply_markup: InlineKeyboardMarkup | None = None, 
+    rich_blocks: list | None = None
+) -> Message | bool:
+    """Редактирует сообщение, используя Rich Message, при ошибке откатывается на HTML."""
+    if rich_blocks:
+        try:
+            return await bot(EditMessageTextRich(
+                chat_id=chat_id,
+                message_id=message_id,
+                rich_message={"blocks": rich_blocks},
+                reply_markup=reply_markup
+            ))
+        except Exception as e:
+            logging.error(f"EditMessageTextRich error: {e}")
+
+    return await bot.edit_message_text(
+        chat_id=chat_id,
+        message_id=message_id,
+        text=html_text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup
+    )
+
 def get_main_menu_keyboard(chat_id: int, is_private: bool = False) -> InlineKeyboardMarkup:
     """Главное меню с кнопкой Mini App."""
     webapp_url = os.getenv("WEBAPP_URL")
@@ -250,6 +289,33 @@ async def help_cmd(message: Message):
 
     await send_smart_message(message.bot, chat_id, html_text, reply_markup=keyboard, rich_blocks=rich_blocks)
 
+async def build_roles_rich_blocks(chat_id: int, roles_data: list) -> list:
+    if not roles_data:
+        return [{"type": "paragraph", "text": "📋 В этой группе пока нет ролей.\n\nАдминистратор может создать роль командой /create <название>"}]
+
+    list_items = []
+    for r_info in roles_data:
+        role_name = r_info["name"]
+        emoji = r_info["emoji"]
+        members = await db.get_role_members(chat_id, role_name)
+        
+        if members:
+            m_list = [{"type": "listitem", "blocks": [{"type": "paragraph", "text": uname.lstrip('@')}]} for _, uname in members]
+            details_block = {
+                "type": "details",
+                "summary": f"{emoji} {role_name} ({len(members)} чел.)",
+                "blocks": [{"type": "list", "items": m_list}]
+            }
+            list_items.append({"type": "listitem", "blocks": [details_block]})
+        else:
+            list_items.append({"type": "listitem", "blocks": [{"type": "paragraph", "text": f"{emoji} {role_name} (участников нет)"}]})
+
+    return [
+        {"type": "heading", "text": "📋 Список Ролей Группы", "size": 2},
+        {"type": "divider"},
+        {"type": "list", "items": list_items}
+    ]
+
 async def safe_answer(query: CallbackQuery, text: str | None = None):
     try:
         await query.answer(text=text)
@@ -261,8 +327,15 @@ async def cb_menu(query: CallbackQuery):
     chat_id = int(query.data.split(":")[2])
     text = await build_menu_text(chat_id)
     keyboard = get_main_menu_keyboard(chat_id)
+    roles = await db.get_all_roles(chat_id)
+    total_members = sum(len(await db.get_role_members(chat_id, r)) for r in roles)
+    rich_blocks = [
+        {"type": "heading", "text": "🛡️ Управление Ролями", "size": 2},
+        {"type": "paragraph", "text": f"📊 Статистика группы:\n• Активных ролей: {len(roles)}\n• Участников: {total_members}"},
+        {"type": "footer", "text": "Используйте панель управления ниже или откройте Mini App"}
+    ]
     try:
-        await query.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        await edit_smart_message(query.message.bot, chat_id, query.message.message_id, text, reply_markup=keyboard, rich_blocks=rich_blocks)
     except Exception:
         pass
     await safe_answer(query, "Обновлено")
@@ -272,52 +345,32 @@ async def cb_list(query: CallbackQuery):
     chat_id = int(query.data.split(":")[2])
     roles_data = await db.get_all_roles_with_details(chat_id)
     is_priv = (query.message.chat.type == ChatType.PRIVATE)
-
-    if not roles_data:
-        text = "📋 <b>В этой группе пока нет ролей.</b>\n\nАдминистратор может создать роль командой <code>/create &lt;название&gt;</code>"
-    else:
-        blocks = []
-        for r_info in roles_data:
-            role_name = r_info["name"]
-            emoji = r_info["emoji"]
-            members = await db.get_role_members(chat_id, role_name)
-            if members:
-                members_str = ", ".join(f"<code>{html.escape(uname.lstrip('@'))}</code>" for _, uname in members)
-            else:
-                members_str = "<i>участников нет</i>"
-
-            blocks.append(f"• {emoji} <b>{html.escape(role_name)}</b> ({len(members)} чел.): {members_str}")
-        
-        blockquote_text = "\n".join(blocks)
-        text = (
-            "📋 <b>Список Ролей Группы:</b>\n"
-            "────────────────────────\n"
-            f"<blockquote expandable>{blockquote_text}</blockquote>"
-        )
-
+    rich_blocks = await build_roles_rich_blocks(chat_id, roles_data)
     keyboard = get_back_keyboard(chat_id, is_private=is_priv)
     try:
-        await query.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        await edit_smart_message(query.message.bot, chat_id, query.message.message_id, "", reply_markup=keyboard, rich_blocks=rich_blocks)
     except Exception:
         pass
+    await safe_answer(query)
     await safe_answer(query)
 
 
 @router.callback_query(F.data == "cb:how_join")
 async def cb_how_join(query: CallbackQuery):
     chat_id = query.message.chat.id
-    text = (
-        "➕ <b>Управление Участием</b>\n"
-        "────────────────────────\n"
-        "<blockquote>Управлять ролями удобнее всего в <b>Mini App</b> по кнопке ниже.</blockquote>\n\n"
-        "<b>Команды в чате:</b>\n"
-        "• <code>/join &lt;роль&gt;</code> — Вступить в роль\n"
-        "• <code>/leave &lt;роль&gt;</code> — Выйти из роли\n"
-        "• <code>/&lt;роль&gt;</code> — Позвать участников роли"
-    )
+    rich_blocks = [
+        {"type": "heading", "text": "➕ Управление Участием", "size": 2},
+        {"type": "blockquote", "text": "Управлять ролями удобнее всего в Mini App по кнопке ниже."},
+        {"type": "paragraph", "text": "Команды в чате:"},
+        {"type": "list", "items": [
+            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/join <роль> — Вступить в роль"}]},
+            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/leave <роль> — Выйти из роли"}]},
+            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/<роль> — Позвать участников роли"}]}
+        ]}
+    ]
     keyboard = get_back_keyboard(chat_id)
     try:
-        await query.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        await edit_smart_message(query.message.bot, chat_id, query.message.message_id, "", reply_markup=keyboard, rich_blocks=rich_blocks)
     except Exception:
         pass
     await safe_answer(query)
@@ -328,26 +381,28 @@ async def cb_help_unified(query: CallbackQuery):
     is_priv = (query.message.chat.type == ChatType.PRIVATE)
     bot_user = html.escape((await query.bot.get_me()).username)
     
-    text = (
-        "❓ <b>Справка и Команды Бота</b>\n"
-        "────────────────────────\n"
-        "<b>👑 Администраторам:</b>\n"
-        "• <code>/create &lt;роль&gt;</code> — Создать новую роль\n"
-        "• <code>/delete &lt;роль&gt;</code> — Удалить роль\n"
-        "• <code>/add &lt;роль&gt; @user</code> — Добавить участника\n"
-        "• <code>/notify &lt;роль&gt; &lt;текст&gt;</code> — Срочное уведомление\n\n"
-        "<b>👥 Вызов участников:</b>\n"
-        "• <code>/all</code> — Позвать ВСЕХ участников чата\n"
-        "• <code>/&lt;роль&gt;</code> — Позвать роль (напр. <code>/dev</code>)\n"
-        "• <code>/join &lt;роль&gt;</code> / <code>/leave &lt;роль&gt;</code> — Вступить/выйти\n"
-        "• <code>/party [места] [цель]</code> — Собрать группу\n\n"
-        "<b>⚡ Inline-режим:</b>\n"
-        f"Впишите в поле ввода любого чата:\n"
-        f"<code>@{bot_user} dev</code> или <code>@{bot_user} party</code>"
-    )
+    rich_blocks = [
+        {"type": "heading", "text": "❓ Справка и Команды Бота", "size": 2},
+        {"type": "paragraph", "text": "👑 Администраторам:"},
+        {"type": "list", "items": [
+            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/create <роль> — Создать новую роль"}]},
+            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/delete <роль> — Удалить роль"}]},
+            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/add <роль> @user — Добавить участника"}]},
+            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/notify <роль> <текст> — Срочное уведомление"}]}
+        ]},
+        {"type": "paragraph", "text": "👥 Вызов участников:"},
+        {"type": "list", "items": [
+            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/all — Позвать ВСЕХ участников чата"}]},
+            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/<роль> — Позвать роль (напр. /dev)"}]},
+            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/join <роль> / /leave <роль> — Вступить/выйти"}]},
+            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/party [места] [цель] — Собрать группу"}]}
+        ]},
+        {"type": "paragraph", "text": "⚡ Inline-режим:\nВпишите в поле ввода любого чата:"},
+        {"type": "pre", "text": f"@{bot_user} dev\n@{bot_user} party"}
+    ]
     keyboard = get_back_keyboard(chat_id, is_private=is_priv)
     try:
-        await query.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        await edit_smart_message(query.message.bot, chat_id, query.message.message_id, "", reply_markup=keyboard, rich_blocks=rich_blocks)
     except Exception:
         pass
     await safe_answer(query)
@@ -606,24 +661,8 @@ async def list_roles(message: Message):
     roles_data = await db.get_all_roles_with_details(chat_id)
     keyboard = get_main_menu_keyboard(chat_id)
 
-    if not roles_data:
-        await message.reply("📋 <b>Список ролей пуст!</b>", reply_markup=keyboard, parse_mode=ParseMode.HTML)
-        return
-
-    blocks = []
-    for r_info in roles_data:
-        role_name = r_info["name"]
-        emoji = r_info["emoji"]
-        members = await db.get_role_members(chat_id, role_name)
-        if members:
-            members_str = ", ".join(f"<code>{html.escape(uname.lstrip('@'))}</code>" for _, uname in members)
-        else:
-            members_str = "<i>участников нет</i>"
-        blocks.append(f"• {emoji} <b>{html.escape(role_name)}</b> ({len(members)} чел.): {members_str}")
-
-    blockquote_text = "\n".join(blocks)
-    full_text = f"📋 <b>Список ролей группы:</b>\n\n<blockquote expandable>{blockquote_text}</blockquote>"
-    await message.reply(full_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+    rich_blocks = await build_roles_rich_blocks(chat_id, roles_data)
+    await send_smart_message(message.bot, chat_id, "", reply_markup=keyboard, rich_blocks=rich_blocks)
 
 
 @router.message(Command("send"))
@@ -787,7 +826,7 @@ async def call_all_members(message: Message):
     )
     await message.reply(text, parse_mode=ParseMode.HTML)
 
-def format_party_message(party: dict) -> tuple[str, InlineKeyboardMarkup | None]:
+def format_party_message(party: dict) -> tuple[list | None, str, InlineKeyboardMarkup | None]:
     """Форматирует динамически обновляемое сообщение сбора пати."""
     title = html.escape(party["title"])
     creator_name = html.escape(party["creator_name"])
@@ -798,7 +837,11 @@ def format_party_message(party: dict) -> tuple[str, InlineKeyboardMarkup | None]
 
     if status == "cancelled":
         text = f"<b>Сбор группы отменен</b>\n\n<b>Цель:</b> {title}\n<b>Организатор:</b> {creator_name}"
-        return text, None
+        blocks = [
+            {"type": "heading", "text": "❌ Сбор отменен", "size": 2},
+            {"type": "paragraph", "text": f"Цель: {party['title']}\nОрганизатор: {party['creator_name']}"}
+        ]
+        return blocks, text, None
 
     if status == "completed":
         mentions_all = " ".join([format_user_mention(m["user_id"], m["username"]) for m in members])
@@ -811,7 +854,44 @@ def format_party_message(party: dict) -> tuple[str, InlineKeyboardMarkup | None]
             "\n".join([f"{i+1}. {format_user_mention(m['user_id'], m['username'])}" for i, m in enumerate(members)]) +
             f"\n\n<b>Призыв участников:</b> {mentions_all}"
         )
-        return text, None
+        
+        list_items = []
+        for i, m in enumerate(members):
+            list_items.append({
+                "type": "listitem", 
+                "blocks": [{"type": "paragraph", "text": f"{m['username'].lstrip('@')}"}],
+                "has_checkbox": True,
+                "is_checked": True
+            })
+            
+        blocks = [
+            {"type": "heading", "text": f"✅ {party['title']} собрана!", "size": 2},
+            {"type": "paragraph", "text": f"Организатор: {party['creator_name']}"},
+            {"type": "list", "items": list_items},
+            {"type": "divider"},
+            {"type": "paragraph", "text": f"Призыв участников: {mentions_all}"}
+        ]
+        return blocks, text, None
+
+    list_items = []
+    for i in range(max_slots):
+        if i < joined_count:
+            m = members[i]
+            is_creator = (m["user_id"] == party["creator_id"])
+            role_suffix = " (Организатор)" if is_creator else ""
+            list_items.append({
+                "type": "listitem", 
+                "blocks": [{"type": "paragraph", "text": f"{m['username'].lstrip('@')}{role_suffix}"}],
+                "has_checkbox": True,
+                "is_checked": True
+            })
+        else:
+            list_items.append({
+                "type": "listitem", 
+                "blocks": [{"type": "paragraph", "text": "Свободный слот"}],
+                "has_checkbox": True,
+                "is_checked": False
+            })
 
     slots_list = []
     for i in range(max_slots):
@@ -824,14 +904,18 @@ def format_party_message(party: dict) -> tuple[str, InlineKeyboardMarkup | None]
             slots_list.append(f"{i+1}. <i>Свободный слот</i>")
 
     slots_str = "\n".join(slots_list)
-
     text = (
         f"<b>Сбор группы: {title}</b> ({joined_count}/{max_slots})\n"
         f"────────────────────────\n"
         f"<b>Организатор:</b> {creator_name}\n\n"
-        f"<b>Состав:</b>\n"
-        f"{slots_str}"
+        f"<b>Состав:</b>\n{slots_str}"
     )
+
+    blocks = [
+        {"type": "heading", "text": f"👥 Сбор: {party['title']}", "size": 2},
+        {"type": "paragraph", "text": f"Организатор: {party['creator_name']}\nМест: {joined_count}/{max_slots}"},
+        {"type": "list", "items": list_items}
+    ]
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -843,7 +927,7 @@ def format_party_message(party: dict) -> tuple[str, InlineKeyboardMarkup | None]
             InlineKeyboardButton(text="Отменить сбор", callback_data=f"pty:cancel:{party['id']}")
         ]
     ])
-    return text, kb
+    return blocks, text, kb
 
 @router.message(Command("party"))
 async def create_party_cmd(message: Message, command: CommandObject):
@@ -872,9 +956,9 @@ async def create_party_cmd(message: Message, command: CommandObject):
     )
 
     party_data = await db.get_party(party_id)
-    text, kb = format_party_message(party_data)
+    blocks, text, kb = format_party_message(party_data)
 
-    msg = await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    msg = await send_smart_message(message.bot, message.chat.id, text, reply_markup=kb, rich_blocks=blocks)
     await db.set_party_message_id(party_id, msg.message_id)
 
     # Ачивка за первый стак
@@ -950,13 +1034,9 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
         await db.unlock_achievement(callback.message.chat.id, user.id, "party_hero")
 
         if party_data and party_data.get("status") == "completed":
-            mentions_all = " ".join([format_user_mention(m["user_id"], m["username"]) for m in party_data["members"]])
-            completion_text = (
-                f"<b>Группа «{html.escape(party_data['title'])}» собрана ({party_data['max_slots']}/{party_data['max_slots']})</b>\n\n"
-                f"<b>Призыв участников:</b> {mentions_all}"
-            )
+            blocks, completion_text, _ = format_party_message(party_data)
             try:
-                await callback.message.reply(completion_text, parse_mode=ParseMode.HTML)
+                await send_smart_message(callback.message.bot, callback.message.chat.id, completion_text, rich_blocks=blocks)
             except Exception as ex:
                 logging.warning(f"Failed to send completion reply: {ex}")
 
@@ -1099,9 +1179,9 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
         await callback.answer("Участник исключен из группы.")
 
     if party_data:
-        text, kb = format_party_message(party_data)
+        blocks, text, kb = format_party_message(party_data)
         try:
-            await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+            await edit_smart_message(callback.message.bot, callback.message.chat.id, callback.message.message_id, text, reply_markup=kb, rich_blocks=blocks)
         except Exception:
             pass
 
