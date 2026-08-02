@@ -300,15 +300,15 @@ async def build_roles_rich_blocks(chat_id: int, roles_data: list) -> list:
         members = await db.get_role_members(chat_id, role_name)
         
         if members:
-            m_list = [{"type": "listitem", "blocks": [{"type": "paragraph", "text": uname.lstrip('@')}]} for _, uname in members]
+            m_list = [{"blocks": [{"type": "paragraph", "text": uname.lstrip('@')}]} for _, uname in members]
             details_block = {
                 "type": "details",
                 "summary": f"{emoji} {role_name} ({len(members)} чел.)",
                 "blocks": [{"type": "list", "items": m_list}]
             }
-            list_items.append({"type": "listitem", "blocks": [details_block]})
+            list_items.append({"blocks": [details_block]})
         else:
-            list_items.append({"type": "listitem", "blocks": [{"type": "paragraph", "text": f"{emoji} {role_name} (участников нет)"}]})
+            list_items.append({"blocks": [{"type": "paragraph", "text": f"{emoji} {role_name} (участников нет)"}]})
 
     return [
         {"type": "heading", "text": "📋 Список Ролей Группы", "size": 2},
@@ -366,9 +366,9 @@ async def cb_how_join(query: CallbackQuery):
         {"type": "blockquote", "text": "Управлять ролями удобнее всего в Mini App по кнопке ниже."},
         {"type": "paragraph", "text": "Команды в чате:"},
         {"type": "list", "items": [
-            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/join <роль> — Вступить в роль"}]},
-            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/leave <роль> — Выйти из роли"}]},
-            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/<роль> — Позвать участников роли"}]}
+            {"blocks": [{"type": "paragraph", "text": "/join <роль> — Вступить в роль"}]},
+            {"blocks": [{"type": "paragraph", "text": "/leave <роль> — Выйти из роли"}]},
+            {"blocks": [{"type": "paragraph", "text": "/<роль> — Позвать участников роли"}]}
         ]}
     ]
     keyboard = get_back_keyboard(chat_id)
@@ -388,17 +388,17 @@ async def cb_help_unified(query: CallbackQuery):
         {"type": "heading", "text": "❓ Справка и Команды Бота", "size": 2},
         {"type": "paragraph", "text": "👑 Администраторам:"},
         {"type": "list", "items": [
-            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/create <роль> — Создать новую роль"}]},
-            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/delete <роль> — Удалить роль"}]},
-            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/add <роль> @user — Добавить участника"}]},
-            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/notify <роль> <текст> — Срочное уведомление"}]}
+            {"blocks": [{"type": "paragraph", "text": "/create <роль> — Создать новую роль"}]},
+            {"blocks": [{"type": "paragraph", "text": "/delete <роль> — Удалить роль"}]},
+            {"blocks": [{"type": "paragraph", "text": "/add <роль> @user — Добавить участника"}]},
+            {"blocks": [{"type": "paragraph", "text": "/notify <роль> <текст> — Срочное уведомление"}]}
         ]},
         {"type": "paragraph", "text": "👥 Вызов участников:"},
         {"type": "list", "items": [
-            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/all — Позвать ВСЕХ участников чата"}]},
-            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/<роль> — Позвать роль (напр. /dev)"}]},
-            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/join <роль> / /leave <роль> — Вступить/выйти"}]},
-            {"type": "listitem", "blocks": [{"type": "paragraph", "text": "/party [места] [цель] — Собрать группу"}]}
+            {"blocks": [{"type": "paragraph", "text": "/all — Позвать ВСЕХ участников чата"}]},
+            {"blocks": [{"type": "paragraph", "text": "/<роль> — Позвать роль (напр. /dev)"}]},
+            {"blocks": [{"type": "paragraph", "text": "/join <роль> / /leave <роль> — Вступить/выйти"}]},
+            {"blocks": [{"type": "paragraph", "text": "/party [места] [цель] — Собрать группу"}]}
         ]},
         {"type": "paragraph", "text": "⚡ Inline-режим:\nВпишите в поле ввода любого чата:"},
         {"type": "pre", "text": f"@{bot_user} dev\n@{bot_user} party"}
@@ -861,7 +861,6 @@ def format_party_message(party: dict) -> tuple[list | None, str, InlineKeyboardM
         list_items = []
         for i, m in enumerate(members):
             list_items.append({
-                "type": "listitem", 
                 "blocks": [{"type": "paragraph", "text": f"{m['username'].lstrip('@')}"}],
                 "has_checkbox": True,
                 "is_checked": True
@@ -883,14 +882,12 @@ def format_party_message(party: dict) -> tuple[list | None, str, InlineKeyboardM
             is_creator = (m["user_id"] == party["creator_id"])
             role_suffix = " (Организатор)" if is_creator else ""
             list_items.append({
-                "type": "listitem", 
                 "blocks": [{"type": "paragraph", "text": f"{m['username'].lstrip('@')}{role_suffix}"}],
                 "has_checkbox": True,
                 "is_checked": True
             })
         else:
             list_items.append({
-                "type": "listitem", 
                 "blocks": [{"type": "paragraph", "text": "Свободный слот"}],
                 "has_checkbox": True,
                 "is_checked": False
