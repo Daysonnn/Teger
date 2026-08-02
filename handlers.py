@@ -292,6 +292,31 @@ async def inline_query_handler(query: InlineQuery):
                 )
             )
 
+        # 2. Опция сбора группы /party
+        if not query_text or query_text.startswith("party") or query_text.startswith("пати") or query_text.startswith("сбор"):
+            p_args = query_text.split()[1:] if query_text else []
+            p_slots = 5
+            p_title_parts = []
+            for a in p_args:
+                if a.isdigit() and 2 <= int(a) <= 10:
+                    p_slots = int(a)
+                else:
+                    p_title_parts.append(a)
+            p_title = " ".join(p_title_parts) if p_title_parts else "Группа"
+
+            add_result(
+                InlineQueryResultArticle(
+                    id="party_inline_cmd",
+                    title=f"Сбор группы: {p_title} ({p_slots} чел.)",
+                    description=f"Запустить /party {p_slots} {p_title}",
+                    thumbnail_url=default_thumb,
+                    input_message_content=InputTextMessageContent(
+                        message_text=f"/party {p_slots} {p_title}",
+                        parse_mode=ParseMode.HTML
+                    )
+                )
+            )
+
         # 2. Выпадающие подсказки для всех существующих ролей
         for r_info in all_roles:
             role_name = r_info["name"]

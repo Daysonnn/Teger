@@ -38,8 +38,9 @@ class CustomAiohttpSession(AiohttpSession):
 async def setup_commands(bot: Bot):
     commands = [
         BotCommand(command="menu", description="Панель управления ролями"),
-        BotCommand(command="all", description="📢 Позвать всех участников чата"),
-        BotCommand(command="notify", description="🚨 (Админ) Срочное уведомление роли"),
+        BotCommand(command="party", description="Собрать группу (например: /party 5 CS2)"),
+        BotCommand(command="all", description="Позвать всех участников чата"),
+        BotCommand(command="notify", description="(Админ) Срочное уведомление роли"),
         BotCommand(command="help", description="Справка"),
         BotCommand(command="list", description="Список ролей"),
         BotCommand(command="join", description="Вступить в роль"),
