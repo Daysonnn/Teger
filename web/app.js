@@ -168,11 +168,7 @@ async function fetchRoles() {
     const data = await res.json();
     allRolesCache = data.roles || [];
 
-    let total = 0;
-    allRolesCache.forEach(r => { total += r.members.length; });
-
     animateCount(document.getElementById('stat-roles-count'), allRolesCache.length);
-    animateCount(document.getElementById('stat-members-count'), total);
 
     renderRoles(allRolesCache);
   } catch {
@@ -311,6 +307,7 @@ async function fetchChatMembers() {
     const res = await fetch(`/api/chat_members?chat_id=${chatId}`);
     const data = await res.json();
     chatMembersCache = data.members || [];
+    animateCount(document.getElementById('stat-members-count'), chatMembersCache.length);
     renderRoster(chatMembersCache);
   } catch {}
 }
@@ -650,5 +647,6 @@ document.querySelectorAll('.emoji-row').forEach(el => {
 // ---- Boot ----
 checkOwnerStatus();
 fetchRoles();
+fetchChatMembers();
 // Проверяем новые ачивки в фоне при старте (для уведомлений в Mini App)
 setTimeout(() => fetchAchievements(), 1500);
