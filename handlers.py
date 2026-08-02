@@ -544,10 +544,10 @@ async def inline_query_handler(query: InlineQuery):
             members = await db.get_inline_role_members(role_name)
             if members:
                 mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
-                mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
+                mentions_str = ", ".join(f"👤 {m}" for m in mentions_list)
                 msg_content = (
-                    f"📢 <b>Призыв участников {emoji} {html.escape(role_name)}!</b> ({len(members)} чел.)\n\n"
-                    f"<blockquote expandable>{mentions_str}</blockquote>"
+                    f"📢 <b>Призыв участников {emoji} {html.escape(role_name)}!</b> ({len(members)} чел.)\n"
+                    f"<blockquote>{mentions_str}</blockquote>"
                 )
                 desc = f"Призыв {len(members)} участников роли"
             else:
@@ -575,10 +575,10 @@ async def inline_query_handler(query: InlineQuery):
             members = await db.get_inline_role_members(query_text)
             if members:
                 mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
-                mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
+                mentions_str = ", ".join(f"👤 {m}" for m in mentions_list)
                 msg_content = (
-                    f"📢 <b>Призыв участников 🛡️ {html.escape(query_text)}!</b> ({len(members)} чел.)\n\n"
-                    f"<blockquote expandable>{mentions_str}</blockquote>"
+                    f"📢 <b>Призыв участников 🛡️ {html.escape(query_text)}!</b> ({len(members)} чел.)\n"
+                    f"<blockquote>{mentions_str}</blockquote>"
                 )
                 desc = f"Позвать {len(members)} участников роли"
             else:
@@ -849,12 +849,12 @@ async def notify_role(message: Message, command: CommandObject, bot: Bot):
         return
 
     mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
-    mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
+    mentions_str = ", ".join(f"👤 {m}" for m in mentions_list)
 
     text = (
-        f"🚨 <b>СРОЧНОЕ УВЕДОМЛЕНИЕ ДЛЯ {emoji} {html.escape(role_name)}!</b> ({len(members)} чел.)\n\n"
-        f"<blockquote>📢 <i>«{html.escape(notice_text)}»</i></blockquote>\n\n"
-        f"<blockquote expandable>{mentions_str}</blockquote>"
+        f"🚨 <b>УВЕДОМЛЕНИЕ ДЛЯ {emoji} {html.escape(role_name)}</b> ({len(members)} чел.)\n\n"
+        f"<blockquote>📢 <i>«{html.escape(notice_text)}»</i></blockquote>\n"
+        f"<blockquote>{mentions_str}</blockquote>"
     )
     await message.reply(text, parse_mode=ParseMode.HTML)
     
@@ -945,11 +945,11 @@ async def call_all_members(message: Message):
         return
 
     mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
-    mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
+    mentions_str = ", ".join(f"👤 {m}" for m in mentions_list)
 
     text = (
-        f"📢 <b>Призыв ВСЕХ участников чата!</b> ({len(members)} чел.)\n\n"
-        f"<blockquote expandable>{mentions_str}</blockquote>"
+        f"📢 <b>Призыв ВСЕХ участников чата!</b> ({len(members)} чел.)\n"
+        f"<blockquote>{mentions_str}</blockquote>"
     )
     await message.reply(text, parse_mode=ParseMode.HTML)
 
@@ -1352,11 +1352,11 @@ async def dynamic_role_call(message: Message):
 
     if members:
         mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
-        mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
+        mentions_str = ", ".join(f"👤 {m}" for m in mentions_list)
 
         text = (
-            f"📢 <b>Призыв участников {emoji} {html.escape(role_name)}!</b> ({len(members)} чел.)\n\n"
-            f"<blockquote expandable>{mentions_str}</blockquote>"
+            f"📢 <b>Призыв участников {emoji} {html.escape(role_name)}!</b> ({len(members)} чел.)\n"
+            f"<blockquote>{mentions_str}</blockquote>"
         )
         await message.reply(text, parse_mode=ParseMode.HTML)
 
