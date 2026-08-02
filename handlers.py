@@ -1,9 +1,11 @@
 import os
 import html
 import time
+import logging
 from aiogram import Router, F, Bot
 from aiogram.enums import ChatType, ParseMode
 from aiogram.filters import CommandObject, Command, CommandStart
+from aiogram.methods.base import TelegramMethod
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo,
     InlineQuery, InlineQueryResultArticle, InputTextMessageContent
@@ -16,6 +18,42 @@ import database as db
 _admin_cache: TTLCache = TTLCache(maxsize=512, ttl=60)
 
 router = Router()
+
+class SendRichMessage(TelegramMethod[Message]):
+    """Кастомный метод Telegram Bot API 10.1+ для отправки структурированных Rich Messages."""
+    __returning__ = Message
+    __api_method__ = "sendRichMessage"
+
+    chat_id: int | str
+    rich_message: dict
+    reply_markup: InlineKeyboardMarkup | None = None
+
+async def send_smart_message(
+    bot: Bot, 
+    chat_id: int, 
+    html_text: str, 
+    reply_markup: InlineKeyboardMarkup | None = None, 
+    rich_blocks: list | None = None,
+    reply_to_message_id: int | None = None
+) -> Message:
+    """Пытается отправить нативный Rich Message (Bot API 10.1+), а при ошибке автоматически фоллбэчится на проверенный HTML."""
+    if rich_blocks:
+        try:
+            return await bot(SendRichMessage(
+                chat_id=chat_id,
+                rich_message={"blocks": rich_blocks},
+                reply_markup=reply_markup
+            ))
+        except Exception as e:
+            logging.debug(f"RichMessage unsupported/failed, falling back to HTML: {e}")
+
+    return await bot.send_message(
+        chat_id=chat_id,
+        text=html_text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup,
+        reply_to_message_id=reply_to_message_id
+    )
 
 def get_main_menu_keyboard(chat_id: int, is_private: bool = False) -> InlineKeyboardMarkup:
     """Главное меню с кнопкой Mini App."""
@@ -152,9 +190,27 @@ async def start_cmd(message: Message, command: CommandObject):
             await message.reply(f"❌ Роль <b>{html.escape(role_name)}</b> не найдена в этой группе.", parse_mode=ParseMode.HTML)
             return
 
-    text = await build_menu_text(chat_id)
+    roles = await db.get_all_roles(chat_id)
+    total_members = sum(len(await db.get_role_members(chat_id, r)) for r in roles)
+    html_text = await build_menu_text(chat_id)
     keyboard = get_main_menu_keyboard(chat_id, is_private=is_priv)
-    await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
+    rich_blocks = [
+        {
+            "type": "section_heading",
+            "text": "🛡️ Управление Ролями"
+        },
+        {
+            "type": "paragraph",
+            "text": f"📊 Статистика группы:\n• Активных ролей: {len(roles)}\n• Участников: {total_members}"
+        },
+        {
+            "type": "footer",
+            "text": "Используйте панель управления ниже или откройте Mini App"
+        }
+    ]
+
+    await send_smart_message(message.bot, chat_id, html_text, reply_markup=keyboard, rich_blocks=rich_blocks)
 
 
 @router.message(Command("help"))
@@ -162,9 +218,27 @@ async def start_cmd(message: Message, command: CommandObject):
 async def help_cmd(message: Message):
     chat_id = message.chat.id
     is_priv = (message.chat.type == ChatType.PRIVATE)
-    text = await build_menu_text(chat_id)
+    roles = await db.get_all_roles(chat_id)
+    total_members = sum(len(await db.get_role_members(chat_id, r)) for r in roles)
+    html_text = await build_menu_text(chat_id)
     keyboard = get_main_menu_keyboard(chat_id, is_private=is_priv)
-    await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
+    rich_blocks = [
+        {
+            "type": "section_heading",
+            "text": "🛡️ Управление Ролями"
+        },
+        {
+            "type": "paragraph",
+            "text": f"📊 Статистика группы:\n• Активных ролей: {len(roles)}\n• Участников: {total_members}"
+        },
+        {
+            "type": "footer",
+            "text": "Используйте панель управления ниже или откройте Mini App"
+        }
+    ]
+
+    await send_smart_message(message.bot, chat_id, html_text, reply_markup=keyboard, rich_blocks=rich_blocks)
 
 async def safe_answer(query: CallbackQuery, text: str | None = None):
     try:
