@@ -55,6 +55,21 @@ async def handle_join_role(request: web.Request):
     result = await db.join_role(int(chat_id), role_name, int(user_id), username or str(user_id))
     if result == "success":
         await db.add_audit_log(int(chat_id), int(user_id), username, "Вступил/Добавлен в роль", f"Роль: {role_name}")
+        # Ачивки через Mini App (без bot объекта — только запись в БД, уведомление придёт при следующей активности)
+        if user_id:
+            await db.unlock_achievement(int(chat_id), int(user_id), "first_join")
+            # Мультикласс
+            all_roles = await db.get_all_roles(int(chat_id))
+            user_role_count = 0
+            for r in all_roles:
+                members = await db.get_role_members(int(chat_id), r)
+                if any(m[0] == int(user_id) for m in members):
+                    user_role_count += 1
+            if user_role_count >= 3:
+                await db.unlock_achievement(int(chat_id), int(user_id), "multiclass")
+            import datetime
+            if 0 <= datetime.datetime.utcnow().hour < 6:
+                await db.unlock_achievement(int(chat_id), int(user_id), "night_shift")
     return web.json_response({"status": result})
 
 async def handle_leave_role(request: web.Request):
@@ -240,12 +255,15 @@ async def handle_admin_stats(request: web.Request):
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_get_achievements(request: web.Request):
-    chat_id = request.query.get("chat_id")
     user_id = request.query.get("user_id")
-    if not chat_id or not user_id:
-        return web.json_response({"error": "chat_id and user_id are required"}, status=400)
+    chat_id = request.query.get("chat_id")
+    if not user_id:
+        return web.json_response({"error": "user_id is required"}, status=400)
     try:
-        achs = await db.get_user_achievements(int(chat_id), int(user_id))
+        if chat_id:
+            achs = await db.get_user_achievements(int(chat_id), int(user_id))
+        else:
+            achs = await db.get_user_achievements_global(int(user_id))
         return web.json_response({"achievements": achs})
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)

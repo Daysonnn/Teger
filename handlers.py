@@ -19,6 +19,41 @@ _admin_cache: TTLCache = TTLCache(maxsize=512, ttl=60)
 
 router = Router()
 
+# Эмодзи для ачивок
+ACH_ICONS = {
+    "first_join": "🛡️",
+    "multiclass": "🎭",
+    "party_starter": "🎉",
+    "party_hero": "⚡",
+    "sheriff": "👑",
+    "night_shift": "🌙",
+}
+
+async def try_unlock_achievement(bot: Bot, chat_id: int, user_id: int, ach_id: str):
+    """Выдаёт ачивку и тихо уведомляет пользователя в ЛС."""
+    unlocked = await db.unlock_achievement(chat_id, user_id, ach_id)
+    if not unlocked:
+        return  # уже была
+    ach = db.ACHIEVEMENTS_DEF.get(ach_id)
+    if not ach:
+        return
+    icon = ACH_ICONS.get(ach_id, "🏆")
+    text = (
+        f"🏅 <b>Новое достижение!</b>\n\n"
+        f"{icon} <b>{ach['title']}</b>\n"
+        f"<i>{ach['desc']}</i>"
+    )
+    try:
+        await bot.send_message(
+            chat_id=user_id,
+            text=text,
+            parse_mode=ParseMode.HTML,
+            disable_notification=True  # беззвучно
+        )
+    except Exception:
+        pass  # пользователь не начал диалог — ничего страшного
+
+
 class SendRichMessage(TelegramMethod[Message]):
     """Кастомный метод Telegram Bot API 10.1+ для отправки структурированных Rich Messages."""
     __returning__ = Message
@@ -607,6 +642,8 @@ async def create_role(message: Message, command: CommandObject, bot: Bot):
             parse_mode=ParseMode.HTML, 
             reply_markup=keyboard
         )
+        # Ачивка: создатель ролей
+        await try_unlock_achievement(bot, chat_id, message.from_user.id, "sheriff")
     else:
         await message.reply(f"⚠️ Роль <b>{html.escape(role_name)}</b> уже существует.", parse_mode=ParseMode.HTML)
 
@@ -646,6 +683,23 @@ async def join_role(message: Message, command: CommandObject):
 
     if result == "success":
         await message.reply(f"🎉 Вы вступили в роль 🛡️ <b>{html.escape(role_name)}</b>!", parse_mode=ParseMode.HTML)
+        # Ачивки за вступление в роль
+        bot_obj = message.bot
+        await try_unlock_achievement(bot_obj, chat_id, user.id, "first_join")
+        # Мультикласс: если уже в 2+ ролях — даём при вступлении в третью
+        all_roles = await db.get_all_roles(chat_id)
+        user_role_count = 0
+        for r in all_roles:
+            members = await db.get_role_members(chat_id, r)
+            if any(m[0] == user.id for m in members):
+                user_role_count += 1
+        if user_role_count >= 3:
+            await try_unlock_achievement(bot_obj, chat_id, user.id, "multiclass")
+        # Ночная активность: 00:00–06:00 UTC
+        import datetime
+        hour = datetime.datetime.utcnow().hour
+        if 0 <= hour < 6:
+            await try_unlock_achievement(bot_obj, chat_id, user.id, "night_shift")
     elif result == "already_in":
         await message.reply(f"ℹ️ Вы уже состоите в роли <b>{html.escape(role_name)}</b>.", parse_mode=ParseMode.HTML)
     elif result == "not_found":

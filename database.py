@@ -449,6 +449,29 @@ async def get_user_achievements(chat_id: int, user_id: int) -> list[dict]:
         })
     return result
 
+async def get_user_achievements_global(user_id: int) -> list[dict]:
+    """Возвращает ачивки пользователя по всем чатам (для Mini App без chat_id)."""
+    async with get_db() as conn:
+        cursor = await conn.execute(
+            'SELECT DISTINCT achievement_id, MIN(unlocked_at) FROM user_achievements WHERE user_id = ? GROUP BY achievement_id',
+            (user_id,)
+        )
+        rows = await cursor.fetchall()
+        unlocked_map = {r[0]: r[1] for r in rows}
+
+    result = []
+    for ach_id, meta in ACHIEVEMENTS_DEF.items():
+        is_unlocked = ach_id in unlocked_map
+        result.append({
+            "id": ach_id,
+            "title": meta["title"],
+            "desc": meta["desc"],
+            "unlocked": is_unlocked,
+            "unlocked_at": unlocked_map.get(ach_id)
+        })
+    return result
+
+
 # ==========================================
 # УПРАВЛЕНИЕ СБОРОМ ПАТИ (LFG)
 # ==========================================

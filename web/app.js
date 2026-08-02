@@ -372,13 +372,43 @@ function renderLogs(logs) {
 // ---- Achievements ----
 const ACH_ICONS = { first_join:'🛡️', multiclass:'🎭', party_starter:'🎉', party_hero:'⚡', sheriff:'👑', night_shift:'🌙', role_master:'🔥' };
 
+// Track previously shown achievements
+const _shownAchs = new Set(JSON.parse(localStorage.getItem('teger_shown_achs') || '[]'));
+
 async function fetchAchievements() {
-  if (!chatId || !currentUser.id) return;
+  // Works with or without chatId
+  if (!currentUser.id) return;
   try {
-    const res = await fetch(`/api/achievements?chat_id=${chatId}&user_id=${currentUser.id}`);
+    const url = chatId
+      ? `/api/achievements?user_id=${currentUser.id}&chat_id=${chatId}`
+      : `/api/achievements?user_id=${currentUser.id}`;
+    const res = await fetch(url);
     const data = await res.json();
-    renderAchievements(data.achievements || []);
-  } catch {}
+    const achs = data.achievements || [];
+
+    // Check for newly unlocked achievements to show in-app notification
+    const newlyUnlocked = achs.filter(a => a.unlocked && !_shownAchs.has(a.id));
+    for (const a of newlyUnlocked) {
+      _shownAchs.add(a.id);
+      showAchievementPopup(a);
+    }
+    localStorage.setItem('teger_shown_achs', JSON.stringify([..._shownAchs]));
+
+    renderAchievements(achs);
+  } catch(e) {
+    console.error('achievements error', e);
+    document.getElementById('achievements-list').innerHTML = `<div class="loader-state">Ошибка загрузки</div>`;
+  }
+}
+
+function showAchievementPopup(ach) {
+  const icon = ACH_ICONS[ach.id] || '🏆';
+  haptic('medium');
+  const el = document.getElementById('toast');
+  el.innerHTML = `${icon} <b>Достижение разблокировано!</b> ${ach.title}`;
+  el.classList.add('visible');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove('visible'), 4000);
 }
 
 function renderAchievements(achs) {
@@ -552,3 +582,5 @@ document.querySelectorAll('.emoji-row').forEach(el => {
 // ---- Boot ----
 checkOwnerStatus();
 fetchRoles();
+// Проверяем новые ачивки в фоне при старте (для уведомлений в Mini App)
+setTimeout(() => fetchAchievements(), 1500);
