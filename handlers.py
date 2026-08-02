@@ -638,8 +638,7 @@ async def create_role(message: Message, command: CommandObject, bot: Bot):
     if await db.create_role(chat_id, role_name):
         keyboard = get_main_menu_keyboard(chat_id)
         await message.reply(
-            f"<blockquote><b>✨ Успешно!</b>\n"
-            f"Роль <b>{html.escape(role_name)}</b> создана и готова к использованию.</blockquote>", 
+            f"✅ Роль 🛡️ <b>{html.escape(role_name)}</b> успешно создана!", 
             parse_mode=ParseMode.HTML, 
             reply_markup=keyboard
         )
@@ -663,17 +662,9 @@ async def delete_role(message: Message, command: CommandObject, bot: Bot):
     chat_id = message.chat.id
 
     if await db.delete_role(chat_id, role_name):
-        await message.reply(
-            f"<blockquote><b>🗑 Удалено</b>\n"
-            f"Роль <b>{html.escape(role_name)}</b> была безвозвратно удалена.</blockquote>", 
-            parse_mode=ParseMode.HTML
-        )
+        await message.reply(f"🗑 Роль <b>{html.escape(role_name)}</b> удалена.", parse_mode=ParseMode.HTML)
     else:
-        await message.reply(
-            f"<blockquote><b>❓ Ошибка</b>\n"
-            f"Роли <b>{html.escape(role_name)}</b> не найдено.</blockquote>", 
-            parse_mode=ParseMode.HTML
-        )
+        await message.reply(f"❓ Роли <b>{html.escape(role_name)}</b> не найдено.", parse_mode=ParseMode.HTML)
 
 @router.message(Command("join"))
 async def join_role(message: Message, command: CommandObject):
@@ -691,11 +682,7 @@ async def join_role(message: Message, command: CommandObject):
     result = await db.join_role(chat_id, role_name, user.id, username)
 
     if result == "success":
-        await message.reply(
-            f"<blockquote><b>🎉 Добро пожаловать!</b>\n"
-            f"Вы вступили в роль <b>{html.escape(role_name)}</b>.</blockquote>", 
-            parse_mode=ParseMode.HTML
-        )
+        await message.reply(f"🎉 Вы вступили в роль 🛡️ <b>{html.escape(role_name)}</b>!", parse_mode=ParseMode.HTML)
         # Ачивки за вступление в роль
         bot_obj = message.bot
         await try_unlock_achievement(bot_obj, chat_id, user.id, "first_join")
@@ -714,17 +701,9 @@ async def join_role(message: Message, command: CommandObject):
         if 0 <= hour < 6:
             await try_unlock_achievement(bot_obj, chat_id, user.id, "night_shift")
     elif result == "already_in":
-        await message.reply(
-            f"<blockquote><b>ℹ️ Внимание</b>\n"
-            f"Вы уже состоите в роли <b>{html.escape(role_name)}</b>.</blockquote>", 
-            parse_mode=ParseMode.HTML
-        )
+        await message.reply(f"ℹ️ Вы уже состоите в роли <b>{html.escape(role_name)}</b>.", parse_mode=ParseMode.HTML)
     elif result == "not_found":
-        await message.reply(
-            f"<blockquote><b>❌ Ошибка</b>\n"
-            f"Роли <b>{html.escape(role_name)}</b> не найдено.</blockquote>", 
-            parse_mode=ParseMode.HTML
-        )
+        await message.reply(f"❌ Роли <b>{html.escape(role_name)}</b> не найдено.", parse_mode=ParseMode.HTML)
 
 @router.message(Command("leave"))
 async def leave_role(message: Message, command: CommandObject):
@@ -738,17 +717,9 @@ async def leave_role(message: Message, command: CommandObject):
     chat_id = message.chat.id
 
     if await db.leave_role(chat_id, role_name, message.from_user.id):
-        await message.reply(
-            f"<blockquote><b>👋 До встречи!</b>\n"
-            f"Вы покинули роль <b>{html.escape(role_name)}</b>.</blockquote>", 
-            parse_mode=ParseMode.HTML
-        )
+        await message.reply(f"👋 Вы покинули роль <b>{html.escape(role_name)}</b>.", parse_mode=ParseMode.HTML)
     else:
-        await message.reply(
-            f"<blockquote><b>ℹ️ Внимание</b>\n"
-            f"Вы не состоите в роли <b>{html.escape(role_name)}</b>.</blockquote>", 
-            parse_mode=ParseMode.HTML
-        )
+        await message.reply(f"ℹ️ Вы не состоите в роли <b>{html.escape(role_name)}</b>.", parse_mode=ParseMode.HTML)
 
 @router.message(Command("list"))
 async def list_roles(message: Message):
@@ -867,11 +838,7 @@ async def add_to_role(message: Message, command: CommandObject, bot: Bot):
             elif res == "already_in":
                 already.append(html.escape(clean_un))
             elif res == "not_found":
-                await message.reply(
-                    f"<blockquote><b>❌ Ошибка</b>\n"
-                    f"Роли <b>{html.escape(role_name)}</b> не найдено.</blockquote>", 
-                    parse_mode=ParseMode.HTML
-                )
+                await message.reply(f"❌ Роли <b>{html.escape(role_name)}</b> не найдено.", parse_mode=ParseMode.HTML)
                 return
 
         msg_parts = []
@@ -879,9 +846,7 @@ async def add_to_role(message: Message, command: CommandObject, bot: Bot):
             msg_parts.append(f"✅ Добавлены в <b>{html.escape(role_name)}</b>: {', '.join(added)}")
         if already:
             msg_parts.append(f"ℹ️ Уже в роли: {', '.join(already)}")
-            
-        final_text = "<blockquote><b>✨ Результат:</b>\n" + "\n".join(msg_parts) + "</blockquote>"
-        await message.reply(final_text, parse_mode=ParseMode.HTML)
+        await message.reply("\n".join(msg_parts), parse_mode=ParseMode.HTML)
         return
 
     if message.reply_to_message:
@@ -892,23 +857,11 @@ async def add_to_role(message: Message, command: CommandObject, bot: Bot):
 
         if result == "success":
             await db.add_audit_log(chat_id, message.from_user.id, sender_un, "Добавление в роль", f"{clean_username} -> {role_name}")
-            await message.reply(
-                f"<blockquote><b>✅ Добавлен</b>\n"
-                f"Пользователь {user_mention} успешно добавлен в роль <b>{html.escape(role_name)}</b>!</blockquote>", 
-                parse_mode=ParseMode.HTML
-            )
+            await message.reply(f"✅ Пользователь {user_mention} добавлен в роль <b>{html.escape(role_name)}</b>!", parse_mode=ParseMode.HTML)
         elif result == "already_in":
-            await message.reply(
-                f"<blockquote><b>ℹ️ Внимание</b>\n"
-                f"Пользователь {user_mention} уже состоит в этой роли.</blockquote>", 
-                parse_mode=ParseMode.HTML
-            )
+            await message.reply(f"ℹ️ Пользователь {user_mention} уже состоит в этой роли.", parse_mode=ParseMode.HTML)
         elif result == "not_found":
-            await message.reply(
-                f"<blockquote><b>❌ Ошибка</b>\n"
-                f"Роли <b>{html.escape(role_name)}</b> не найдено.</blockquote>", 
-                parse_mode=ParseMode.HTML
-            )
+            await message.reply(f"❌ Роли <b>{html.escape(role_name)}</b> не найдено.", parse_mode=ParseMode.HTML)
         return
 
     await message.reply(
@@ -936,8 +889,7 @@ async def call_all_members(message: Message):
     mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
 
     text = (
-        f"<blockquote><b>📢 Призыв всех участников чата!</b> ({len(members)} чел.)\n\n"
-        f"<i>Кто-то зовёт всех в чат.</i></blockquote>\n\n"
+        f"📢 <b>Призыв ВСЕХ участников чата!</b> ({len(members)} чел.)\n\n"
         f"<blockquote expandable>{mentions_str}</blockquote>"
     )
     await message.reply(text, parse_mode=ParseMode.HTML)
