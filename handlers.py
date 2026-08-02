@@ -70,16 +70,25 @@ def get_back_keyboard(chat_id: int, is_private: bool = False) -> InlineKeyboardM
 
 
 
+def escape_md(text: str | int | None) -> str:
+    """Экранирует специальные символы Telegram MarkdownV2."""
+    if text is None:
+        return ""
+    s = str(text)
+    for char in r"_*[]()~`>#+-=|{}.!":
+        s = s.replace(char, f"\\{char}")
+    return s
+
 def format_user_mention(user_id: int, username: str) -> str:
-    """Форматирует упоминание пользователя."""
+    """Форматирует упоминание пользователя для MarkdownV2."""
     if username and username.startswith("@"):
-        return html.escape(username)
-    safe_name = html.escape(username) if username else f"User {user_id}"
-    return f'<a href="tg://user?id={user_id}">{safe_name}</a>'
+        return escape_md(username)
+    safe_name = escape_md(username) if username else f"User {user_id}"
+    return f"[{safe_name}](tg://user?id={user_id})"
 
 async def is_group(message: Message) -> bool:
     if message.chat.type == ChatType.PRIVATE:
-        await message.reply("⚡ Эта команда работает только в <b>группах</b>!", parse_mode=ParseMode.HTML)
+        await message.reply("⚡ Эта команда работает только в *группах*\\!", parse_mode=ParseMode.MARKDOWN_V2)
         return False
     return True
 
@@ -101,11 +110,11 @@ async def build_menu_text(chat_id: int) -> str:
         total_members += len(members)
 
     return (
-        "🛡️ <b>Управление Ролями</b>\n\n"
-        "<blockquote>📊 <b>Статистика группы:</b>\n"
-        f"• Активных ролей: <b>{len(roles)}</b>\n"
-        f"• Участников: <b>{total_members}</b></blockquote>\n\n"
-        "<i>Используйте панель управления ниже или откройте Mini App:</i>"
+        "# 🛡️ Управление Ролями\n\n"
+        "> 📊 *Статистика группы:*\n"
+        f"> • Активных ролей: *{len(roles)}*\n"
+        f"> • Участников: *{total_members}*\n\n"
+        "_Используйте панель управления ниже или откройте Mini App:_"
     )
 
 @router.message(CommandStart())
@@ -113,7 +122,6 @@ async def start_cmd(message: Message, command: CommandObject):
     chat_id = message.chat.id
     is_priv = (message.chat.type == ChatType.PRIVATE)
     
-    # Диплинк для моментального вступления: join_roleName_chatId или join_roleName
     if command.args and command.args.startswith("join_"):
         role_raw = command.args[5:]
         target_chat_id = chat_id
@@ -132,20 +140,21 @@ async def start_cmd(message: Message, command: CommandObject):
         user = message.from_user
         username = f"@{user.username}" if user.username else user.first_name
         res = await db.join_role(target_chat_id, role_name, user.id, username)
+        safe_role = escape_md(role_name)
         
         if res == "success":
-            await message.reply(f"🎉 Вы вступили в роль 🛡️ <b>{html.escape(role_name)}</b>!", parse_mode=ParseMode.HTML)
+            await message.reply(f"🎉 Вы вступили в роль 🛡️ *{safe_role}*\\!", parse_mode=ParseMode.MARKDOWN_V2)
             return
         elif res == "already_in":
-            await message.reply(f"ℹ️ Вы уже состоите в роли <b>{html.escape(role_name)}</b>.", parse_mode=ParseMode.HTML)
+            await message.reply(f"ℹ️ Вы уже состоите в роли *{safe_role}*\\.", parse_mode=ParseMode.MARKDOWN_V2)
             return
         elif res == "not_found":
-            await message.reply(f"❌ Роль <b>{html.escape(role_name)}</b> не найдена в этой группе.", parse_mode=ParseMode.HTML)
+            await message.reply(f"❌ Роль *{safe_role}* не найдена в этой группе\\.", parse_mode=ParseMode.MARKDOWN_V2)
             return
 
     text = await build_menu_text(chat_id)
     keyboard = get_main_menu_keyboard(chat_id, is_private=is_priv)
-    await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+    await message.reply(text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=keyboard)
 
 
 @router.message(Command("help"))
@@ -155,7 +164,7 @@ async def help_cmd(message: Message):
     is_priv = (message.chat.type == ChatType.PRIVATE)
     text = await build_menu_text(chat_id)
     keyboard = get_main_menu_keyboard(chat_id, is_private=is_priv)
-    await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+    await message.reply(text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=keyboard)
 
 async def safe_answer(query: CallbackQuery, text: str | None = None):
     try:
@@ -169,7 +178,7 @@ async def cb_menu(query: CallbackQuery):
     text = await build_menu_text(chat_id)
     keyboard = get_main_menu_keyboard(chat_id)
     try:
-        await query.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        await query.message.edit_text(text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=keyboard)
     except Exception:
         pass
     await safe_answer(query, "Обновлено")
@@ -181,26 +190,29 @@ async def cb_list(query: CallbackQuery):
     is_priv = (query.message.chat.type == ChatType.PRIVATE)
 
     if not roles_data:
-        text = "📋 <b>В этой группе пока нет ролей.</b>\n\nАдминистратор может создать роль командой <code>/create &lt;название&gt;</code>"
+        text = "# 📋 В этой группе пока нет ролей\n\nАдминистратор может создать роль командой `/create <название>`"
     else:
         blocks = []
         for r_info in roles_data:
-            role_name = r_info["name"]
+            role_name = escape_md(r_info["name"])
             emoji = r_info["emoji"]
-            members = await db.get_role_members(chat_id, role_name)
+            members = await db.get_role_members(chat_id, r_info["name"])
             if members:
-                members_str = ", ".join(f"<code>{html.escape(uname.lstrip('@'))}</code>" for _, uname in members)
+                members_str = ", ".join(f"`{escape_md(uname.lstrip('@'))}`" for _, uname in members)
             else:
-                members_str = "<i>участников нет</i>"
+                members_str = "_участников нет_"
 
-            blocks.append(f"• {emoji} <b>{html.escape(role_name)}</b> ({len(members)} чел.): {members_str}")
+            blocks.append(f"• {emoji} *{role_name}* \\({len(members)} чел\\.\\): {members_str}")
         
         blockquote_text = "\n".join(blocks)
-        text = f"📋 <b>Список Ролей Группы:</b>\n\n<blockquote expandable>{blockquote_text}</blockquote>"
+        text = (
+            "# 📋 Список Ролей Группы\n\n"
+            f"**> {blockquote_text}"
+        )
 
     keyboard = get_back_keyboard(chat_id, is_private=is_priv)
     try:
-        await query.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        await query.message.edit_text(text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=keyboard)
     except Exception:
         pass
     await safe_answer(query)
@@ -210,16 +222,16 @@ async def cb_list(query: CallbackQuery):
 async def cb_how_join(query: CallbackQuery):
     chat_id = query.message.chat.id
     text = (
-        "➕ <b>Управление Участием</b>\n\n"
-        "<blockquote>Управлять ролями удобнее всего в <b>Mini App</b> по кнопке ниже.</blockquote>\n\n"
-        "<b>Команды в чате:</b>\n"
-        "• <code>/join &lt;роль&gt;</code> — Вступить в роль\n"
-        "• <code>/leave &lt;роль&gt;</code> — Выйти из роли\n"
-        "• <code>/&lt;роль&gt;</code> — Позвать участников роли"
+        "# ➕ Управление Участием\n\n"
+        "> Управлять ролями удобнее всего в *Mini App* по кнопке ниже\\.\n\n"
+        "## Команды в чате\n"
+        "• `/join <роль>` — Вступить в роль\n"
+        "• `/leave <роль>` — Выйти из роли\n"
+        "• `/<роль>` — Позвать участников роли"
     )
     keyboard = get_back_keyboard(chat_id)
     try:
-        await query.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        await query.message.edit_text(text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=keyboard)
     except Exception:
         pass
     await safe_answer(query)
@@ -228,22 +240,23 @@ async def cb_how_join(query: CallbackQuery):
 async def cb_help_unified(query: CallbackQuery):
     chat_id = query.message.chat.id
     is_priv = (query.message.chat.type == ChatType.PRIVATE)
-    bot_user = (await query.bot.get_me()).username
+    bot_user = escape_md((await query.bot.get_me()).username)
     
     text = (
-        "❓ <b>Справка и Команды Бота</b>\n\n"
-        "<b>👑 Команды Администратора:</b>\n"
-        "• <code>/create &lt;роль&gt;</code> — Создать новую роль\n"
-        "• <code>/delete &lt;роль&gt;</code> — Удалить роль\n"
-        "• <code>/add &lt;роль&gt; @user</code> — Добавить участника в роль\n"
-        "• <code>/notify &lt;роль&gt; &lt;текст&gt;</code> — Срочное уведомление роли\n\n"
-        "<b>👥 Вызов участников:</b>\n"
-        "• <code>/all</code> — Позвать ВСЕХ участников чата\n"
-        "• <code>/&lt;роль&gt;</code> — Позвать участников роли (напр. <code>/dev</code>)\n"
-        "• <code>/join &lt;роль&gt;</code> / <code>/leave &lt;роль&gt;</code> — Вступить/выйти\n\n"
-        "<b>⚡ Inline-режим:</b>\n"
+        "# ❓ Справка и Команды Бота\n\n"
+        "## 👑 Администраторам\n"
+        "• `/create <роль>` — Создать новую роль\n"
+        "• `/delete <роль>` — Удалить роль\n"
+        "• `/add <роль> @user` — Добавить участника\n"
+        "• `/notify <роль> <текст>` — Срочное уведомление\n\n"
+        "## 👥 Вызов участников\n"
+        "• `/all` — Позвать ВСЕХ участников чата\n"
+        "• `/<роль>` — Позвать роль \\(напр\\. `/dev`\\)\n"
+        "• `/join <роль>` / `/leave <роль>` — Вступить/выйти\n"
+        "• `/party [места] [цель]` — Собрать группу\n\n"
+        "## ⚡ Inline\\-режим\n"
         f"Впишите в поле ввода любого чата:\n"
-        f"<code>@{bot_user} dev</code> или <code>@{bot_user} all</code>"
+        f"`@{bot_user} dev` или `@{bot_user} party`"
     )
     keyboard = get_back_keyboard(chat_id, is_private=is_priv)
     try:
@@ -417,62 +430,57 @@ async def inline_query_handler(query: InlineQuery):
         ]
         await query.answer(fallback, cache_time=0, is_personal=True)
 
-
-
-
-
-
-
-
 @router.message(Command("create"))
 async def create_role(message: Message, command: CommandObject, bot: Bot):
     if not await is_group(message): return
     if not await check_admin(bot, message):
-        await message.reply("👑 Только для администраторов!")
+        await message.reply("👑 Только для администраторов\\!", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     if not command.args:
-        await message.reply("💡 Использование: <code>/create &lt;название&gt;</code>", parse_mode=ParseMode.HTML)
+        await message.reply("💡 Использование: `/create <название>`", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     role_name = command.args.split()[0]
     chat_id = message.chat.id
+    safe_name = escape_md(role_name)
 
     if await db.create_role(chat_id, role_name):
         keyboard = get_main_menu_keyboard(chat_id)
         await message.reply(
-            f"✅ Роль 🛡️ <b>{html.escape(role_name)}</b> успешно создана!", 
-            parse_mode=ParseMode.HTML, 
+            f"✅ Роль 🛡️ *{safe_name}* успешно создана\\!", 
+            parse_mode=ParseMode.MARKDOWN_V2, 
             reply_markup=keyboard
         )
     else:
-        await message.reply(f"⚠️ Роль <b>{html.escape(role_name)}</b> уже существует.", parse_mode=ParseMode.HTML)
+        await message.reply(f"⚠️ Роль *{safe_name}* уже существует\\.", parse_mode=ParseMode.MARKDOWN_V2)
 
 @router.message(Command("delete"))
 async def delete_role(message: Message, command: CommandObject, bot: Bot):
     if not await is_group(message): return
     if not await check_admin(bot, message):
-        await message.reply("👑 Только для администраторов!")
+        await message.reply("👑 Только для администраторов\\!", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     if not command.args:
-        await message.reply("💡 Использование: <code>/delete &lt;название&gt;</code>", parse_mode=ParseMode.HTML)
+        await message.reply("💡 Использование: `/delete <название>`", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     role_name = command.args.split()[0]
     chat_id = message.chat.id
+    safe_name = escape_md(role_name)
 
     if await db.delete_role(chat_id, role_name):
-        await message.reply(f"🗑 Роль <b>{html.escape(role_name)}</b> удалена.", parse_mode=ParseMode.HTML)
+        await message.reply(f"🗑 Роль *{safe_name}* удалена\\.", parse_mode=ParseMode.MARKDOWN_V2)
     else:
-        await message.reply(f"❓ Роли <b>{html.escape(role_name)}</b> не найдено.", parse_mode=ParseMode.HTML)
+        await message.reply(f"❓ Роли *{safe_name}* не найдено\\.", parse_mode=ParseMode.MARKDOWN_V2)
 
 @router.message(Command("join"))
 async def join_role(message: Message, command: CommandObject):
     if not await is_group(message): return
 
     if not command.args:
-        await message.reply("💡 Использование: <code>/join &lt;название&gt;</code>", parse_mode=ParseMode.HTML)
+        await message.reply("💡 Использование: `/join <название>`", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     role_name = command.args.split()[0]
@@ -481,29 +489,31 @@ async def join_role(message: Message, command: CommandObject):
     username = f"@{user.username}" if user.username else user.first_name
 
     result = await db.join_role(chat_id, role_name, user.id, username)
+    safe_name = escape_md(role_name)
 
     if result == "success":
-        await message.reply(f"🎉 Вы вступили в роль 🛡️ <b>{html.escape(role_name)}</b>!", parse_mode=ParseMode.HTML)
+        await message.reply(f"🎉 Вы вступили в роль 🛡️ *{safe_name}*\\!", parse_mode=ParseMode.MARKDOWN_V2)
     elif result == "already_in":
-        await message.reply(f"ℹ️ Вы уже состоите в роли <b>{html.escape(role_name)}</b>.", parse_mode=ParseMode.HTML)
+        await message.reply(f"ℹ️ Вы уже состоите в роли *{safe_name}*\\.", parse_mode=ParseMode.MARKDOWN_V2)
     elif result == "not_found":
-        await message.reply(f"❌ Роли <b>{html.escape(role_name)}</b> не найдено.", parse_mode=ParseMode.HTML)
+        await message.reply(f"❌ Роли *{safe_name}* не найдено\\.", parse_mode=ParseMode.MARKDOWN_V2)
 
 @router.message(Command("leave"))
 async def leave_role(message: Message, command: CommandObject):
     if not await is_group(message): return
 
     if not command.args:
-        await message.reply("💡 Использование: <code>/leave &lt;название&gt;</code>", parse_mode=ParseMode.HTML)
+        await message.reply("💡 Использование: `/leave <название>`", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     role_name = command.args.split()[0]
     chat_id = message.chat.id
+    safe_name = escape_md(role_name)
 
     if await db.leave_role(chat_id, role_name, message.from_user.id):
-        await message.reply(f"👋 Вы покинули роль <b>{html.escape(role_name)}</b>.", parse_mode=ParseMode.HTML)
+        await message.reply(f"👋 Вы покинули роль *{safe_name}*\\.", parse_mode=ParseMode.MARKDOWN_V2)
     else:
-        await message.reply(f"ℹ️ Вы не состоите в роли <b>{html.escape(role_name)}</b>.", parse_mode=ParseMode.HTML)
+        await message.reply(f"ℹ️ Вы не состоите в роли *{safe_name}*\\.", parse_mode=ParseMode.MARKDOWN_V2)
 
 @router.message(Command("list"))
 async def list_roles(message: Message):
@@ -514,30 +524,27 @@ async def list_roles(message: Message):
     keyboard = get_main_menu_keyboard(chat_id)
 
     if not roles_data:
-        await message.reply("📋 <b>Список ролей пуст!</b>", reply_markup=keyboard, parse_mode=ParseMode.HTML)
+        await message.reply("# 📋 Список ролей пуст", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     blocks = []
     for r_info in roles_data:
-        role_name = r_info["name"]
+        role_name = escape_md(r_info["name"])
         emoji = r_info["emoji"]
-        members = await db.get_role_members(chat_id, role_name)
+        members = await db.get_role_members(chat_id, r_info["name"])
         if members:
-            # Удаляем символ @ при просмотре списка, чтобы Telegram ГАРАНТИРОВАННО не слал пуш-уведомления!
-            members_str = ", ".join(f"<code>{html.escape(uname.lstrip('@'))}</code>" for _, uname in members)
+            members_str = ", ".join(f"`{escape_md(uname.lstrip('@'))}`" for _, uname in members)
         else:
-            members_str = "<i>участников нет</i>"
-        blocks.append(f"• {emoji} <b>{html.escape(role_name)}</b> ({len(members)} чел.): {members_str}")
+            members_str = "_участников нет_"
+        blocks.append(f"• {emoji} *{role_name}* \\({len(members)} чел\\.\\): {members_str}")
 
     blockquote_text = "\n".join(blocks)
-    full_text = f"📋 <b>Список ролей группы:</b>\n\n<blockquote expandable>{blockquote_text}</blockquote>"
-    await message.reply(full_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
-
+    full_text = f"# 📋 Список ролей группы\n\n**> {blockquote_text}"
+    await message.reply(full_text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=keyboard)
 
 
 @router.message(Command("send"))
 async def send_custom_msg(message: Message, command: CommandObject, bot: Bot):
-    # Разрешаем владельцу бота (из OWNER_ID в .env)
     owner_id_env = os.getenv("OWNER_ID")
     is_owner = False
     if owner_id_env:
@@ -546,19 +553,18 @@ async def send_custom_msg(message: Message, command: CommandObject, bot: Bot):
         except ValueError:
             pass
 
-    # Если не владелец — проверяем права админа в группе
     if not is_owner:
         if message.chat.type == ChatType.PRIVATE or not await check_admin(bot, message):
             await message.reply(
-                f"⛔ У вас нет доступа к этой команде.\n\n"
-                f"💡 <b>Ваш User ID:</b> <code>{message.from_user.id}</code>\n"
-                f"💡 <b>OWNER_ID в .env:</b> <code>{owner_id_env or 'не задан'}</code>",
-                parse_mode=ParseMode.HTML
+                f"⛔ У вас нет доступа к этой команде\\.\n\n"
+                f"💡 *Ваш User ID:* `{message.from_user.id}`\n"
+                f"💡 *OWNER\\_ID в \\.env:* `{escape_md(owner_id_env or 'не задан')}`",
+                parse_mode=ParseMode.MARKDOWN_V2
             )
             return
 
     if not command.args or len(command.args.split()) < 2:
-        await message.reply("💡 Использование: <code>/send &lt;chat_id&gt; &lt;текст сообщения&gt;</code>", parse_mode=ParseMode.HTML)
+        await message.reply("💡 Использование: `/send <chat_id> <текст сообщения>`", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     parts = command.args.split(maxsplit=1)
@@ -566,20 +572,20 @@ async def send_custom_msg(message: Message, command: CommandObject, bot: Bot):
     msg_text = parts[1]
 
     try:
-        await bot.send_message(chat_id=target_chat_id, text=msg_text, parse_mode=ParseMode.HTML)
-        await message.reply(f"✅ Сообщение успешно отправлено в <code>{target_chat_id}</code>!", parse_mode=ParseMode.HTML)
+        await bot.send_message(chat_id=target_chat_id, text=msg_text, parse_mode=ParseMode.MARKDOWN_V2)
+        await message.reply(f"✅ Сообщение успешно отправлено в `{escape_md(target_chat_id)}`\\!", parse_mode=ParseMode.MARKDOWN_V2)
     except Exception as e:
-        await message.reply(f"❌ Ошибка отправки: <code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML)
+        await message.reply(f"❌ Ошибка отправки: `{escape_md(str(e))}`", parse_mode=ParseMode.MARKDOWN_V2)
 
 @router.message(Command("notify"))
 async def notify_role(message: Message, command: CommandObject, bot: Bot):
     if not await is_group(message): return
     if not await check_admin(bot, message):
-        await message.reply("👑 Только для администраторов!")
+        await message.reply("👑 Только для администраторов\\!", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     if not command.args or len(command.args.split()) < 2:
-        await message.reply("💡 Использование: <code>/notify &lt;роль&gt; &lt;текст уведомления&gt;</code>", parse_mode=ParseMode.HTML)
+        await message.reply("💡 Использование: `/notify <роль> <текст уведомления>`", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     parts = command.args.split(maxsplit=1)
@@ -591,19 +597,18 @@ async def notify_role(message: Message, command: CommandObject, bot: Bot):
     members = await db.get_role_members(chat_id, role_name)
 
     if not members:
-        await message.reply(f"❌ В роли {emoji} <b>{html.escape(role_name)}</b> пока нет участников или она не существует.", parse_mode=ParseMode.HTML)
+        await message.reply(f"❌ В роли {emoji} *{escape_md(role_name)}* пока нет участников\\.", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
     mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
 
     text = (
-        f"🚨 <b>СРОЧНОЕ УВЕДОМЛЕНИЕ ДЛЯ {emoji} {html.escape(role_name)}!</b> ({len(members)} чел.)\n\n"
-        f"<blockquote>📢 <i>«{html.escape(notice_text)}»</i></blockquote>\n\n"
-        f"<blockquote expandable>{mentions_str}</blockquote>"
+        f"# 🚨 СРОЧНОЕ УВЕДОМЛЕНИЕ: {emoji} {escape_md(role_name).upper()} \\({len(members)} чел\\.\\)\n\n"
+        f"> 📢 _{escape_md(notice_text)}_\n\n"
+        f"**> {mentions_str}"
     )
-    # Чистое независимое сообщение без меню-кнопок
-    await message.reply(text, parse_mode=ParseMode.HTML)
+    await message.reply(text, parse_mode=ParseMode.MARKDOWN_V2)
     
     sender_un = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
     await db.add_audit_log(chat_id, message.from_user.id, sender_un, "Уведомление роли", f"Роль: {role_name}")
@@ -612,15 +617,15 @@ async def notify_role(message: Message, command: CommandObject, bot: Bot):
 async def add_to_role(message: Message, command: CommandObject, bot: Bot):
     if not await is_group(message): return
     if not await check_admin(bot, message):
-        await message.reply("👑 Только для администраторов!")
+        await message.reply("👑 Только для администраторов\\!", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     if not command.args:
         await message.reply(
-            "💡 <b>Способы добавления в роль:</b>\n"
-            "• <code>/add &lt;роль&gt; @username</code> (можно несколько через пробел)\n"
-            "• Ответом на сообщение человека: <code>/add &lt;роль&gt;</code>", 
-            parse_mode=ParseMode.HTML
+            "# 💡 Добавление в роль\n\n"
+            "• `/add <роль> @username` \\(можно несколько через пробел\\)\n"
+            "• Ответом на сообщение: `/add <роль>`", 
+            parse_mode=ParseMode.MARKDOWN_V2
         )
         return
 
@@ -629,7 +634,6 @@ async def add_to_role(message: Message, command: CommandObject, bot: Bot):
     chat_id = message.chat.id
     sender_un = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
 
-    # 1. Если переданы юзернеймы (/add dev @alex @john)
     raw_usernames = args_list[1:]
     if raw_usernames:
         added = []
@@ -639,23 +643,22 @@ async def add_to_role(message: Message, command: CommandObject, bot: Bot):
             synthetic_id = db.get_user_id_from_username(clean_un)
             res = await db.join_role(chat_id, role_name, synthetic_id, clean_un)
             if res == "success":
-                added.append(html.escape(clean_un))
+                added.append(escape_md(clean_un))
                 await db.add_audit_log(chat_id, message.from_user.id, sender_un, "Добавление в роль", f"{clean_un} -> {role_name}")
             elif res == "already_in":
-                already.append(html.escape(clean_un))
+                already.append(escape_md(clean_un))
             elif res == "not_found":
-                await message.reply(f"❌ Роли <b>{html.escape(role_name)}</b> не найдено.", parse_mode=ParseMode.HTML)
+                await message.reply(f"❌ Роли *{escape_md(role_name)}* не найдено\\.", parse_mode=ParseMode.MARKDOWN_V2)
                 return
 
         msg_parts = []
         if added:
-            msg_parts.append(f"✅ Добавлены в <b>{html.escape(role_name)}</b>: {', '.join(added)}")
+            msg_parts.append(f"✅ Добавлены в *{escape_md(role_name)}*: {', '.join(added)}")
         if already:
             msg_parts.append(f"ℹ️ Уже в роли: {', '.join(already)}")
-        await message.reply("\n".join(msg_parts), parse_mode=ParseMode.HTML)
+        await message.reply("\n".join(msg_parts), parse_mode=ParseMode.MARKDOWN_V2)
         return
 
-    # 2. Если добавление ответом на сообщение
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
         clean_username = f"@{target_user.username}" if target_user.username else target_user.first_name
@@ -664,19 +667,17 @@ async def add_to_role(message: Message, command: CommandObject, bot: Bot):
 
         if result == "success":
             await db.add_audit_log(chat_id, message.from_user.id, sender_un, "Добавление в роль", f"{clean_username} -> {role_name}")
-            await message.reply(f"✅ Пользователь {user_mention} добавлен в роль <b>{html.escape(role_name)}</b>!", parse_mode=ParseMode.HTML)
+            await message.reply(f"✅ Пользователь {user_mention} добавлен в роль *{escape_md(role_name)}*\\!", parse_mode=ParseMode.MARKDOWN_V2)
         elif result == "already_in":
-            await message.reply(f"ℹ️ Пользователь {user_mention} уже состоит в этой роли.", parse_mode=ParseMode.HTML)
+            await message.reply(f"ℹ️ Пользователь {user_mention} уже состоит в этой роли\\.", parse_mode=ParseMode.MARKDOWN_V2)
         elif result == "not_found":
-            await message.reply(f"❌ Роли <b>{html.escape(role_name)}</b> не найдено.", parse_mode=ParseMode.HTML)
+            await message.reply(f"❌ Роли *{escape_md(role_name)}* не найдено\\.", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     await message.reply(
-        "💡 Укажите юзернейм через @ или ответьте на сообщение:\n<code>/add &lt;роль&gt; @username</code>", 
-        parse_mode=ParseMode.HTML
+        "💡 Укажите юзернейм через @ или ответьте на сообщение:\n`/add <роль> @username`", 
+        parse_mode=ParseMode.MARKDOWN_V2
     )
-
-
 
 @router.message(Command("all"))
 @router.message(Command("everyone"))
@@ -691,62 +692,65 @@ async def call_all_members(message: Message):
     
     members = await db.get_all_chat_users(chat_id)
     if not members:
-        await message.reply("👥 В группе пока нет зарегистрированных участников.")
+        await message.reply("# 👥 В группе пока нет участников", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
     mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
 
     text = (
-        f"📢 <b>Призыв ВСЕХ участников чата!</b> ({len(members)} чел.)\n\n"
-        f"<blockquote expandable>{mentions_str}</blockquote>"
+        f"# 📢 Призыв ВСЕХ участников чата \\({len(members)} чел\\.\\)\n\n"
+        f"**> {mentions_str}"
     )
-    # Чистое независимое сообщение
-    await message.reply(text, parse_mode=ParseMode.HTML)
+    await message.reply(text, parse_mode=ParseMode.MARKDOWN_V2)
 
 def format_party_message(party: dict) -> tuple[str, InlineKeyboardMarkup | None]:
-    """Форматирует динамически обновляемое сообщение сбора пати."""
-    title = html.escape(party["title"])
-    creator_name = html.escape(party["creator_name"])
+    """Форматирует динамически обновляемое сообщение сбора пати в MarkdownV2 со структурированными заголовками."""
+    title = escape_md(party["title"])
+    creator_name = escape_md(party["creator_name"])
     max_slots = party["max_slots"]
     status = party["status"]
     members = party["members"]
     joined_count = len(members)
 
     if status == "cancelled":
-        text = f"<b>Сбор группы отменен</b>\n\n<b>Цель:</b> {title}\n<b>Организатор:</b> {creator_name}"
+        text = (
+            f"# Сбор группы отменен\n\n"
+            f"*Цель:* {title}\n"
+            f"*Организатор:* {creator_name}"
+        )
         return text, None
 
     if status == "completed":
         mentions_all = " ".join([format_user_mention(m["user_id"], m["username"]) for m in members])
         text = (
-            f"<b>Группа собрана ({joined_count}/{max_slots})</b>\n"
-            f"────────────────────────\n"
-            f"<b>Цель:</b> {title}\n"
-            f"<b>Организатор:</b> {creator_name}\n\n"
-            f"<b>Состав:</b>\n" +
-            "\n".join([f"{i+1}. {format_user_mention(m['user_id'], m['username'])}" for i, m in enumerate(members)]) +
-            f"\n\n<b>Призыв участников:</b> {mentions_all}"
+            f"# 🔥 Группа «{title}» собрана \\({joined_count}/{max_slots}\\)\n\n"
+            f"*Цель:* {title}\n"
+            f"*Организатор:* {creator_name}\n\n"
+            f"## Состав участников:\n" +
+            "\n".join([f"{i+1}\\. {format_user_mention(m['user_id'], m['username'])}" for i, m in enumerate(members)]) +
+            f"\n\n*Призыв участников:* {mentions_all}"
         )
         return text, None
 
     slots_list = []
+    org_tag = "_\\(Организатор\\)_"
     for i in range(max_slots):
         if i < joined_count:
             m = members[i]
             user_label = format_user_mention(m["user_id"], m["username"])
             is_creator = (m["user_id"] == party["creator_id"])
-            slots_list.append(f"{i+1}. {user_label} {'(Организатор)' if is_creator else ''}")
+            tag = f" {org_tag}" if is_creator else ""
+            slots_list.append(f"{i+1}\\. {user_label}{tag}")
         else:
-            slots_list.append(f"{i+1}. <i>Свободный слот</i>")
+            slots_list.append(f"{i+1}\\. _Свободный слот_")
 
     slots_str = "\n".join(slots_list)
 
     text = (
-        f"<b>Сбор группы: {title}</b> ({joined_count}/{max_slots})\n"
-        f"────────────────────────\n"
-        f"<b>Организатор:</b> {creator_name}\n\n"
-        f"<b>Состав:</b>\n"
+        f"# Сбор группы: {title} \\({joined_count}/{max_slots}\\)\n\n"
+        f"*Организатор:* {creator_name}\n\n"
+        f"## Состав участников:\n"
         f"{slots_str}"
     )
 
@@ -791,7 +795,7 @@ async def create_party_cmd(message: Message, command: CommandObject):
     party_data = await db.get_party(party_id)
     text, kb = format_party_message(party_data)
 
-    msg = await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    msg = await message.reply(text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=kb)
     await db.set_party_message_id(party_id, msg.message_id)
 
     # Ачивка за первый стак
@@ -801,11 +805,11 @@ async def create_party_cmd(message: Message, command: CommandObject):
 async def change_party_title_cmd(message: Message, command: CommandObject, bot: Bot):
     if not await is_group(message): return
     if not command.args:
-        await message.reply("💡 Использование: ответом на карточку сбора укажите <code>/party_title Новое название</code>", parse_mode=ParseMode.HTML)
+        await message.reply("💡 Использование: `/party_title Новое название`", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     if not message.reply_to_message:
-        await message.reply("⚠️ Отправьте эту команду ответом на карточку сбора пати!", parse_mode=ParseMode.HTML)
+        await message.reply("⚠️ Отправьте эту команду ответом на сообщение сбора пати\\!", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     reply_msg_id = message.reply_to_message.message_id
@@ -814,7 +818,7 @@ async def change_party_title_cmd(message: Message, command: CommandObject, bot: 
         p = await cursor.fetchone()
 
     if not p:
-        await message.reply("❌ Сбор не найден или уже завершен.")
+        await message.reply("❌ Сбор не найден или уже завершен\\.", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     party_id, creator_id = p[0], p[1]
@@ -822,18 +826,19 @@ async def change_party_title_cmd(message: Message, command: CommandObject, bot: 
     is_admin = await check_admin(bot, message)
 
     if not is_creator and not is_admin:
-        await message.reply("⛔ Изменить название может только организатор сбора!")
+        await message.reply("⛔ Изменить название может только организатор сбора\\!", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     new_title = command.args.strip()
     updated_party = await db.update_party_title(party_id, new_title)
     if updated_party:
         text, kb = format_party_message(updated_party)
+        safe_title = escape_md(new_title)
         try:
-            await bot.edit_message_text(text, chat_id=message.chat.id, message_id=reply_msg_id, parse_mode=ParseMode.HTML, reply_markup=kb)
-            await message.reply(f"✅ Название сбора успешно изменено на «{html.escape(new_title)}»!", parse_mode=ParseMode.HTML)
+            await bot.edit_message_text(text, chat_id=message.chat.id, message_id=reply_msg_id, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=kb)
+            await message.reply(f"✅ Название сбора успешно изменено на «*{safe_title}*»\\!", parse_mode=ParseMode.MARKDOWN_V2)
         except Exception:
-            await message.reply(f"✅ Название изменено на «{html.escape(new_title)}»!", parse_mode=ParseMode.HTML)
+            await message.reply(f"✅ Название изменено на «*{safe_title}*»\\!", parse_mode=ParseMode.MARKDOWN_V2)
 
 @router.callback_query(F.data.startswith("pty:"))
 async def handle_party_callback(callback: CallbackQuery, bot: Bot):
@@ -868,12 +873,13 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
 
         if party_data and party_data.get("status") == "completed":
             mentions_all = " ".join([format_user_mention(m["user_id"], m["username"]) for m in party_data["members"]])
+            safe_p_title = escape_md(party_data['title'])
             completion_text = (
-                f"<b>Группа «{html.escape(party_data['title'])}» собрана ({party_data['max_slots']}/{party_data['max_slots']})</b>\n\n"
-                f"<b>Призыв участников:</b> {mentions_all}"
+                f"# 🔥 Группа «{safe_p_title}» собрана \\({party_data['max_slots']}/{party_data['max_slots']}\\)\n\n"
+                f"*Призыв участников:* {mentions_all}"
             )
             try:
-                await callback.message.reply(completion_text, parse_mode=ParseMode.HTML)
+                await callback.message.reply(completion_text, parse_mode=ParseMode.MARKDOWN_V2)
             except Exception as ex:
                 logging.warning(f"Failed to send completion reply: {ex}")
 
@@ -902,8 +908,8 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
             return
 
         text = (
-            f"<b>⚙️ Настройки сбора: {html.escape(party_data['title'])}</b>\n"
-            f"Число мест: <b>{party_data['max_slots']}</b> (Занято: {len(party_data['members'])})"
+            f"# ⚙️ Настройки сбора: {escape_md(party_data['title'])}\n\n"
+            f"Число мест: *{party_data['max_slots']}* \\(Занято: {len(party_data['members'])}\\)"
         )
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [
@@ -920,20 +926,20 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
                 InlineKeyboardButton(text="◀️ Назад к сбору", callback_data=f"pty:refresh:{party_id}")
             ]
         ])
-        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        await callback.message.edit_text(text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=kb)
         return
 
     elif action == "title_menu":
         if not is_creator and not is_admin: return
         text = (
-            f"<b>Изменение названия сбора:</b>\n\n"
+            f"# Изменение названия сбора\n\n"
             f"Отправьте команду ответом на сообщение сбора:\n"
-            f"<code>/party_title Новое название</code>"
+            f"`/party_title Новое название`"
         )
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="◀️ Назад", callback_data=f"pty:settings:{party_id}")]
         ])
-        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        await callback.message.edit_text(text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=kb)
         return
 
     elif action == "inc_slots":
@@ -945,7 +951,7 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
         else:
             await callback.answer("Максимум 10 мест.", show_alert=True)
             return
-        text = f"<b>⚙️ Настройки сбора: {html.escape(party_data['title'])}</b>\nЧисло мест: <b>{party_data['max_slots']}</b> (Занято: {len(party_data['members'])})"
+        text = f"# ⚙️ Настройки сбора: {escape_md(party_data['title'])}\n\nЧисло мест: *{party_data['max_slots']}* \\(Занято: {len(party_data['members'])}\\)"
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(text="➕ 1 слот", callback_data=f"pty:inc_slots:{party_id}"),
@@ -961,7 +967,7 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
                 InlineKeyboardButton(text="◀️ Назад к сбору", callback_data=f"pty:refresh:{party_id}")
             ]
         ])
-        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        await callback.message.edit_text(text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=kb)
         return
 
     elif action == "dec_slots":
@@ -973,7 +979,7 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
         else:
             await callback.answer("Нельзя сделать меньше задействованных мест или меньше 2.", show_alert=True)
             return
-        text = f"<b>⚙️ Настройки сбора: {html.escape(party_data['title'])}</b>\nЧисло мест: <b>{party_data['max_slots']}</b> (Занято: {len(party_data['members'])})"
+        text = f"# ⚙️ Настройки сбора: {escape_md(party_data['title'])}\n\nЧисло мест: *{party_data['max_slots']}* \\(Занято: {len(party_data['members'])}\\)"
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(text="➕ 1 слот", callback_data=f"pty:inc_slots:{party_id}"),
@@ -989,7 +995,7 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
                 InlineKeyboardButton(text="◀️ Назад к сбору", callback_data=f"pty:refresh:{party_id}")
             ]
         ])
-        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        await callback.message.edit_text(text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=kb)
         return
 
     elif action == "kick_menu":
@@ -1005,8 +1011,8 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
         ]
         buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"pty:settings:{party_id}")])
 
-        text = f"<b>Выберите участника для исключения:</b>"
-        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+        text = f"# Выберите участника для исключения:"
+        await callback.message.edit_text(text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
         return
 
     elif action == "kick":
@@ -1018,7 +1024,7 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
     if party_data:
         text, kb = format_party_message(party_data)
         try:
-            await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+            await callback.message.edit_text(text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=kb)
         except Exception:
             pass
 
@@ -1037,7 +1043,7 @@ def _collect_known_commands() -> None:
                     name = cmd.command if hasattr(cmd, 'command') else str(cmd)
                     KNOWN_COMMANDS.add(name.lower())
 
-    fallback = {"start", "help", "menu", "create", "delete", "join", "leave", "list", "add", "all", "everyone", "notify", "send", "party"}
+    fallback = {"start", "help", "menu", "create", "delete", "join", "leave", "list", "add", "all", "everyone", "notify", "send", "party", "party_title"}
     KNOWN_COMMANDS.update(fallback)
 
 
@@ -1063,13 +1069,13 @@ async def dynamic_role_call(message: Message):
 
     if members:
         mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
-        mentions_str = "\n".join(f"👤 {m}" for m in mentions_str) if False else "\n".join(f"👤 {m}" for m in mentions_list)
+        mentions_str = "\n".join(f"> 👤 {m}" for m in mentions_list)
 
         text = (
-            f"📢 <b>Призыв участников {emoji} {html.escape(command_text)}!</b> ({len(members)} чел.)\n\n"
-            f"<blockquote expandable>{mentions_str}</blockquote>"
+            f"# 📢 Призыв участников {emoji} {escape_md(command_text)} \\({len(members)} чел\\.\\)\n\n"
+            f"**{mentions_str}"
         )
-        await message.reply(text, parse_mode=ParseMode.HTML)
+        await message.reply(text, parse_mode=ParseMode.MARKDOWN_V2)
 
 
 
