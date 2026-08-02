@@ -689,19 +689,19 @@ def format_party_message(party: dict) -> tuple[str, InlineKeyboardMarkup | None]
     joined_count = len(members)
 
     if status == "cancelled":
-        text = f"❌ <b>СБОР ПАТИ ОТМЕНЕН</b>\n\n<b>Цель:</b> {title}\n<b>Организатор:</b> {creator_name}"
+        text = f"<b>Сбор группы отменен</b>\n\n<b>Цель:</b> {title}\n<b>Организатор:</b> {creator_name}"
         return text, None
 
     if status == "completed":
         mentions_all = " ".join([format_user_mention(m["user_id"], m["username"]) for m in members])
         text = (
-            f"🔥 <b>ПАТИ УСПЕШНО СОБРАНО! ({joined_count}/{max_slots})</b>\n"
+            f"<b>Группа собрана ({joined_count}/{max_slots})</b>\n"
             f"────────────────────────\n"
-            f"🎮 <b>Цель:</b> {title}\n"
-            f"👑 <b>Организатор:</b> {creator_name}\n\n"
-            f"👥 <b>Итоговый состав:</b>\n" +
+            f"<b>Цель:</b> {title}\n"
+            f"<b>Организатор:</b> {creator_name}\n\n"
+            f"<b>Состав:</b>\n" +
             "\n".join([f"{i+1}. {format_user_mention(m['user_id'], m['username'])}" for i, m in enumerate(members)]) +
-            f"\n\n📢 <b>Призыв:</b> {mentions_all}\n<i>Все в сборе! Заходите в голосовой канал / игру!</i>"
+            f"\n\n<b>Призыв участников:</b> {mentions_all}"
         )
         return text, None
 
@@ -711,28 +711,27 @@ def format_party_message(party: dict) -> tuple[str, InlineKeyboardMarkup | None]
             m = members[i]
             user_label = format_user_mention(m["user_id"], m["username"])
             is_creator = (m["user_id"] == party["creator_id"])
-            slots_list.append(f"{i+1}. 👤 {user_label} {'(Организатор)' if is_creator else ''}")
+            slots_list.append(f"{i+1}. {user_label} {'(Организатор)' if is_creator else ''}")
         else:
-            slots_list.append(f"{i+1}. ⏳ <i>Свободный слот</i>")
+            slots_list.append(f"{i+1}. <i>Свободный слот</i>")
 
     slots_str = "\n".join(slots_list)
 
     text = (
-        f"🎮 <b>СБОР ПАТИ: {title}</b> ({joined_count}/{max_slots})\n"
+        f"<b>Сбор группы: {title}</b> ({joined_count}/{max_slots})\n"
         f"────────────────────────\n"
-        f"👑 <b>Организатор:</b> {creator_name}\n\n"
-        f"👥 <b>Состав команды:</b>\n"
-        f"{slots_str}\n\n"
-        f"💬 <i>Жмите кнопку ниже, чтобы занять свободное место!</i>"
+        f"<b>Организатор:</b> {creator_name}\n\n"
+        f"<b>Состав:</b>\n"
+        f"{slots_str}"
     )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="➕ Вступить в пати", callback_data=f"pty:join:{party['id']}"),
-            InlineKeyboardButton(text="➖ Покинуть", callback_data=f"pty:leave:{party['id']}")
+            InlineKeyboardButton(text="Вступить", callback_data=f"pty:join:{party['id']}"),
+            InlineKeyboardButton(text="Выйти", callback_data=f"pty:leave:{party['id']}")
         ],
         [
-            InlineKeyboardButton(text="❌ Отменить сбор", callback_data=f"pty:cancel:{party['id']}")
+            InlineKeyboardButton(text="Отменить сбор", callback_data=f"pty:cancel:{party['id']}")
         ]
     ])
     return text, kb

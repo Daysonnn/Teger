@@ -378,40 +378,28 @@ async def get_all_chat_ids() -> list[int]:
 # ==========================================
 ACHIEVEMENTS_DEF = {
     "first_join": {
-        "title": "ПЕРВАЯ КРОВЬ",
-        "badge": "🎯",
-        "score": "10G",
-        "desc": "Присоединиться к первой роли в чате"
+        "title": "Первая роль",
+        "desc": "Получена первая роль в чате"
     },
     "multiclass": {
-        "title": "МАСТЕР ВСЕХ КЛАССОВ",
-        "badge": "⚔️",
-        "score": "25G",
-        "desc": "Состоять одновременно в 3+ разных ролях"
+        "title": "Мультикласс",
+        "desc": "Участие в 3 и более ролях одновременно"
     },
     "party_starter": {
-        "title": "КАПИТАН СТАКА",
-        "badge": "🎮",
-        "score": "30G",
-        "desc": "Собрать первое успешное пати"
+        "title": "Организатор группы",
+        "desc": "Собрана первая группа в чате"
     },
     "party_hero": {
-        "title": "БОЕВОЙ ТОВАРИЩ",
-        "badge": "🤝",
-        "score": "20G",
-        "desc": "Присоединиться к пати другого участника"
+        "title": "Участник сбора",
+        "desc": "Присоединение к группе участников"
     },
     "sheriff": {
-        "title": "ШЕРИФ ГИЛЬДИИ",
-        "badge": "👑",
-        "score": "50G",
-        "desc": "Создать новую роль в чате"
+        "title": "Создатель ролей",
+        "desc": "Создана новая роль для чата"
     },
     "night_shift": {
-        "title": "НОЧНАЯ СМЕНА",
-        "badge": "🌙",
-        "score": "15G",
-        "desc": "Вступить в роль в ночное время (00:00 - 06:00)"
+        "title": "Ночная активность",
+        "desc": "Вход в роль в период с 00:00 до 06:00"
     }
 }
 
@@ -446,8 +434,6 @@ async def get_user_achievements(chat_id: int, user_id: int) -> list[dict]:
         result.append({
             "id": ach_id,
             "title": meta["title"],
-            "badge": meta["badge"],
-            "score": meta["score"],
             "desc": meta["desc"],
             "unlocked": is_unlocked,
             "unlocked_at": unlocked_map.get(ach_id)

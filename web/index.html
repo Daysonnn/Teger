@@ -641,65 +641,46 @@
             border-bottom: 1px solid var(--card-border);
         }
 
-        /* Ачивки (Xbox style) */
+        /* Ачивки (Clean Minimalist) */
         .ach-card {
-            display: flex;
-            align-items: center;
-            gap: 14px;
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid var(--card-border);
             border-radius: var(--radius-inner);
-            padding: 14px;
-            margin-bottom: 10px;
-            opacity: 0.45;
-            filter: grayscale(100%);
-            transition: opacity 0.2s ease, filter 0.2s ease, border-color 0.2s ease;
+            padding: 14px 16px;
+            margin-bottom: 8px;
+            opacity: 0.4;
+            transition: all 0.2s ease;
         }
 
         .ach-card.unlocked {
             opacity: 1;
-            filter: grayscale(0%);
-            background: rgba(52, 199, 89, 0.08);
-            border-color: rgba(52, 199, 89, 0.3);
-        }
-
-        .ach-icon-box {
-            width: 44px;
-            height: 44px;
-            border-radius: 10px;
-            background: rgba(255, 255, 255, 0.08);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 22px;
-            flex-shrink: 0;
-        }
-
-        .ach-info {
-            flex: 1;
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.18);
         }
 
         .ach-title-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 2px;
+            margin-bottom: 4px;
         }
 
         .ach-title {
             font-size: 14px;
-            font-weight: 800;
+            font-weight: 700;
             letter-spacing: -0.2px;
         }
 
-        .ach-score {
-            font-family: 'JetBrains Mono', monospace;
+        .ach-status {
             font-size: 11px;
-            font-weight: 700;
-            color: var(--accent-gold);
-            background: rgba(245, 158, 11, 0.15);
-            padding: 2px 8px;
-            border-radius: 6px;
+            font-weight: 600;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .ach-card.unlocked .ach-status {
+            color: var(--accent-blue);
         }
 
         .ach-desc {
@@ -906,16 +887,13 @@
             </div>
         </div>
 
-        <!-- ТАБ: Ачивки (Xbox Style) -->
+        <!-- ТАБ: Достижения -->
         <div id="tab-achievements" class="tab-content">
             <div class="glass-card">
                 <div class="card-file-header">
-                    <span class="file-icon">🏆</span> achievements.xbox
+                    <span class="file-icon">📜</span> achievements.json
                 </div>
-                <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
-                    <span>Достижения профиля</span>
-                    <span id="gamerscore-badge" style="font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:800; color:var(--accent-gold); background:rgba(245,158,11,0.15); padding:4px 10px; border-radius:8px; border:1px solid rgba(245,158,11,0.3);">0G</span>
-                </div>
+                <div class="card-title">Достижения аккаунта</div>
                 <div id="achievements-list">
                     <div class="loader-text">Загрузка достижений...</div>
                 </div>
@@ -1131,23 +1109,14 @@
                 const data = await res.json();
                 const achs = data.achievements || [];
                 
-                let totalG = 0;
-                achs.forEach(a => {
-                    if (a.unlocked) totalG += parseInt(a.score);
-                });
-                document.getElementById('gamerscore-badge').textContent = `${totalG}G`;
-
                 const container = document.getElementById('achievements-list');
                 container.innerHTML = achs.map(a => `
                     <div class="ach-card ${a.unlocked ? 'unlocked' : ''}">
-                        <div class="ach-icon-box">${a.badge}</div>
-                        <div class="ach-info">
-                            <div class="ach-title-row">
-                                <div class="ach-title">${escapeHtml(a.title)}</div>
-                                <div class="ach-score">${escapeHtml(a.score)}</div>
-                            </div>
-                            <div class="ach-desc">${escapeHtml(a.desc)}</div>
+                        <div class="ach-title-row">
+                            <div class="ach-title">${escapeHtml(a.title)}</div>
+                            <div class="ach-status">${a.unlocked ? 'Получено' : 'Заблокировано'}</div>
                         </div>
+                        <div class="ach-desc">${escapeHtml(a.desc)}</div>
                     </div>
                 `).join('');
             } catch (e) {
