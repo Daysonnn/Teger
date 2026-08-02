@@ -1313,7 +1313,7 @@ def _collect_known_commands() -> None:
                     name = cmd.command if hasattr(cmd, 'command') else str(cmd)
                     KNOWN_COMMANDS.add(name.lower())
 
-    fallback = {"start", "help", "menu", "create", "delete", "join", "leave", "list", "add", "all", "everyone", "notify", "send", "party", "party_title"}
+    fallback = {"start", "help", "menu", "create", "delete", "join", "leave", "list", "add", "all", "everyone", "notify", "send", "party", "party_title", "alias", "unalias"}
     KNOWN_COMMANDS.update(fallback)
 
 
@@ -1334,15 +1334,17 @@ async def dynamic_role_call(message: Message):
         return
 
     chat_id = message.chat.id
-    emoji = await db.get_role_emoji(chat_id, command_text)
-    members = await db.get_role_members(chat_id, command_text)
+    role_name = await db.resolve_role_name(chat_id, command_text)
+    
+    emoji = await db.get_role_emoji(chat_id, role_name)
+    members = await db.get_role_members(chat_id, role_name)
 
     if members:
         mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
         mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
 
         text = (
-            f"📢 <b>Призыв участников {emoji} {html.escape(command_text)}!</b> ({len(members)} чел.)\n\n"
+            f"📢 <b>Призыв участников {emoji} {html.escape(role_name)}!</b> ({len(members)} чел.)\n\n"
             f"<blockquote expandable>{mentions_str}</blockquote>"
         )
         await message.reply(text, parse_mode=ParseMode.HTML)
