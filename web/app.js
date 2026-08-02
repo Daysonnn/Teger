@@ -1,108 +1,138 @@
 // ==========================================
-//  Teger Mini App — app.js
-//  Optimized, clean, GPU-friendly
+//  Teger Mini App — app.js v2
 // ==========================================
 
 const tg = window.Telegram.WebApp;
 tg.expand();
 tg.ready();
 
-let currentUser = tg.initDataUnsafe.user || { id: 0, first_name: 'Гость' };
+let currentUser = tg.initDataUnsafe?.user || { id: 0, first_name: 'Гость' };
 const urlParams = new URLSearchParams(window.location.search);
-let chatId = urlParams.get('chat_id') || tg.initDataUnsafe.start_param;
+let chatId = urlParams.get('chat_id') || tg.initDataUnsafe?.start_param;
 let allRolesCache = [];
 let chatMembersCache = [];
 let activeModalRole = null;
 let selectedRoleEmoji = '🛡️';
 let isOwnerUser = false;
 let currentSendMode = 'single';
+let activeTab = 'roles';
 
-// ---- Init ----
+// ---- Init UI ----
 document.getElementById('user-display-name').textContent = currentUser.first_name || 'Гость';
 document.getElementById('chat-info').textContent = chatId
-  ? `Группа ID: ${chatId}`
-  : `Пользователь: ${currentUser.first_name}`;
+  ? `Чат ${chatId}`
+  : currentUser.first_name || 'Гость';
 
 if (chatId) document.getElementById('admin-chat-id').value = chatId;
 
-const savedDraft = localStorage.getItem('last_broadcast_message');
+const savedDraft = localStorage.getItem('teger_broadcast_draft');
 if (savedDraft) document.getElementById('admin-msg-text').value = savedDraft;
 
 // ---- Utils ----
-function escapeHtml(text) {
-  return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function esc(t) {
+  return (t || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-function triggerHaptic(type = 'light') {
-  if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred(type);
+function haptic(type = 'light') {
+  tg.HapticFeedback?.impactOccurred(type);
 }
 
-let toastTimer = null;
-function showToast(text) {
-  const toast = document.getElementById('toast');
-  toast.textContent = text;
-  toast.classList.add('visible');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove('visible'), 3000);
+let _toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('visible');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove('visible'), 2800);
 }
 
 function saveDraftMessage() {
-  localStorage.setItem('last_broadcast_message', document.getElementById('admin-msg-text').value);
+  localStorage.setItem('teger_broadcast_draft', document.getElementById('admin-msg-text').value);
 }
 
 function restoreLastMessage() {
-  const saved = localStorage.getItem('last_broadcast_message');
-  if (saved) {
-    document.getElementById('admin-msg-text').value = saved;
-    triggerHaptic('light');
-    showToast('Восстановлен последний текст!');
-  } else {
-    showToast('Черновиков пока нет');
+  const s = localStorage.getItem('teger_broadcast_draft');
+  if (s) { document.getElementById('admin-msg-text').value = s; haptic(); toast('Черновик восстановлен'); }
+  else toast('Черновиков нет');
+}
+
+// ---- Animated counter ----
+function animateCount(el, target) {
+  const start = parseInt(el.textContent) || 0;
+  if (start === target) return;
+  const dur = 600, step = 16;
+  let t = 0;
+  const timer = setInterval(() => {
+    t += step;
+    const p = Math.min(t / dur, 1);
+    const ease = 1 - Math.pow(1 - p, 3);
+    el.textContent = Math.round(start + (target - start) * ease);
+    if (p >= 1) clearInterval(timer);
+  }, step);
+}
+
+// ---- Tab switching ----
+function switchTab(name, btn) {
+  haptic('light');
+  activeTab = name;
+
+  document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+
+  const page = document.getElementById(`tab-${name}`);
+  if (page) page.classList.add('active');
+  if (btn) btn.classList.add('active');
+  else {
+    const navBtn = document.querySelector(`.nav-btn[data-tab="${name}"]`);
+    if (navBtn) navBtn.classList.add('active');
   }
+
+  if (name === 'stats') fetchChatMembers();
+  else if (name === 'logs') fetchAuditLogs();
+  else if (name === 'achievements') fetchAchievements();
+  else if (name === 'admin') fetchAdminStats();
 }
 
-// ---- Tabs ----
-function switchTab(tabName, btnElement) {
-  triggerHaptic('light');
-  document.querySelectorAll('.nav-item-btn').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+// ---- Pull-to-refresh ----
+let _pullStart = 0, _pulling = false, _refreshThreshold = 72;
+const _container = document.querySelector('.page-container');
+const _pullEl = document.getElementById('pull-indicator');
 
-  const targetBtn = btnElement || document.querySelector(`.nav-item-btn[onclick*="${tabName}"]`);
-  if (targetBtn) targetBtn.classList.add('active');
-  const targetContent = document.getElementById(`tab-${tabName}`);
-  if (targetContent) targetContent.classList.add('active');
+_container.addEventListener('touchstart', e => {
+  if (_container.scrollTop === 0) _pullStart = e.touches[0].clientY;
+}, { passive: true });
 
-  if (tabName === 'stats') fetchChatMembers();
-  else if (tabName === 'logs') fetchAuditLogs();
-  else if (tabName === 'achievements') fetchAchievements();
-  else if (tabName === 'admin') fetchAdminStats();
+_container.addEventListener('touchmove', e => {
+  if (!_pullStart) return;
+  const dy = e.touches[0].clientY - _pullStart;
+  if (dy > 20 && _container.scrollTop === 0) {
+    _pulling = true;
+    if (dy > _refreshThreshold) _pullEl.classList.add('visible');
+  }
+}, { passive: true });
+
+_container.addEventListener('touchend', async () => {
+  if (_pulling && _pullEl.classList.contains('visible')) {
+    haptic('medium');
+    await refreshCurrentTab();
+    await new Promise(r => setTimeout(r, 400));
+  }
+  _pullEl.classList.remove('visible');
+  _pulling = false;
+  _pullStart = 0;
+});
+
+async function refreshCurrentTab() {
+  if (activeTab === 'roles') await fetchRoles();
+  else if (activeTab === 'stats') await fetchChatMembers();
+  else if (activeTab === 'logs') await fetchAuditLogs();
+  else if (activeTab === 'achievements') await fetchAchievements();
+  else if (activeTab === 'admin') await fetchAdminStats();
 }
 
-// ---- Emoji ----
-function selectEmoji(el, emoji) {
-  triggerHaptic('light');
-  document.querySelectorAll('.emoji-btn-item').forEach(e => e.classList.remove('active'));
-  el.classList.add('active');
-  selectedRoleEmoji = emoji;
-}
-
-// ---- Admin mode toggle ----
-function setSendMode(mode) {
-  currentSendMode = mode;
-  triggerHaptic('light');
-  const chatIdGroup = document.getElementById('chat-id-group');
-  const sendBtn = document.getElementById('admin-send-btn');
-  document.getElementById('toggle-single').classList.toggle('active', mode === 'single');
-  document.getElementById('toggle-global').classList.toggle('active', mode === 'global');
-  chatIdGroup.style.display = mode === 'global' ? 'none' : 'flex';
-  sendBtn.textContent = mode === 'global'
-    ? '📢 Запустить МАССОВУЮ рассылку во ВСЕ чаты'
-    : '🚀 Отправить сообщение в чат';
-}
-
-// ---- API helpers ----
-async function apiPost(endpoint, body) {
-  const res = await fetch(endpoint, {
+// ---- API ----
+async function apiPost(url, body) {
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
@@ -110,7 +140,7 @@ async function apiPost(endpoint, body) {
   return res.json();
 }
 
-// ---- Check owner ----
+// ---- Owner check ----
 async function checkOwnerStatus() {
   if (!currentUser.id) return;
   try {
@@ -118,102 +148,163 @@ async function checkOwnerStatus() {
     const data = await res.json();
     if (data.is_owner) {
       isOwnerUser = true;
-      document.getElementById('admin-tab-btn').style.display = 'flex';
+      const btn = document.getElementById('admin-tab-btn');
+      btn.style.display = 'flex';
     }
-  } catch (e) {
-    console.error('Ошибка проверки владельца:', e);
-  }
+  } catch {}
 }
 
-// ---- Fetch roles ----
+// ---- Roles ----
 async function fetchRoles() {
   const container = document.getElementById('roles-list');
   if (!chatId) {
-    container.innerHTML = `<div class="loader-text">Откройте Mini App из группы,<br>чтобы загрузить её роли.</div>`;
+    container.innerHTML = `<div class="loader-state">Откройте Mini App из группы</div>`;
     return;
   }
+  // Show skeletons
+  container.innerHTML = `<div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div>`;
   try {
     const res = await fetch(`/api/roles?chat_id=${chatId}`);
     const data = await res.json();
     allRolesCache = data.roles || [];
 
-    let totalMembers = 0;
-    allRolesCache.forEach(r => { totalMembers += r.members.length; });
+    let total = 0;
+    allRolesCache.forEach(r => { total += r.members.length; });
 
-    document.getElementById('stat-roles-count').textContent = allRolesCache.length;
-    document.getElementById('stat-members-count').textContent = totalMembers;
+    animateCount(document.getElementById('stat-roles-count'), allRolesCache.length);
+    animateCount(document.getElementById('stat-members-count'), total);
 
     renderRoles(allRolesCache);
-  } catch (err) {
-    console.error('Ошибка загрузки:', err);
-    container.innerHTML = `<div class="loader-text" style="color:var(--accent-red);">Ошибка подключения к серверу</div>`;
+  } catch {
+    container.innerHTML = `<div class="loader-state" style="color:var(--red)">Ошибка соединения</div>`;
   }
 }
 
-// ---- Render roles (DocumentFragment for performance) ----
+function filterRoles() {
+  const q = document.getElementById('search-input').value.toLowerCase().trim();
+  renderRoles(allRolesCache.filter(r => r.name.toLowerCase().includes(q)));
+}
+
 function renderRoles(roles) {
   const container = document.getElementById('roles-list');
   container.innerHTML = '';
 
-  if (roles.length === 0) {
-    container.innerHTML = `<div class="loader-text">Ролей пока нет</div>`;
+  if (!roles.length) {
+    container.innerHTML = `<div class="loader-state">Ролей пока нет</div>`;
     return;
   }
 
   const frag = document.createDocumentFragment();
-
-  roles.forEach((role, idx) => {
+  roles.forEach((role, i) => {
     const isMember = role.members.some(m => m.user_id === currentUser.id);
-    const roleIcon = role.emoji || '🛡️';
+    const icon = role.emoji || '🛡️';
 
     const card = document.createElement('div');
-    card.className = 'role-item-card';
-    card.style.animationDelay = `${idx * 40}ms`;
+    card.className = 'role-card';
+    card.style.animationDelay = `${i * 35}ms`;
 
-    // Members row
-    let membersHtml = '';
-    if (role.members.length > 0) {
-      membersHtml = role.members.map(m => {
-        const isMe = m.user_id === currentUser.id;
-        return `<span class="member-badge ${isMe ? 'is-me' : ''}">${isMe ? '⭐ ' : ''}${escapeHtml(m.username)}</span>`;
-      }).join('');
-    } else {
-      membersHtml = `<span style="font-size:13px;color:var(--text-dim);font-style:italic;">участников нет</span>`;
-    }
+    const membersHtml = role.members.length
+      ? role.members.map(m => {
+          const me = m.user_id === currentUser.id;
+          return `<span class="mbadge${me ? ' me' : ''}">${me ? '⭐ ' : ''}${esc(m.username)}</span>`;
+        }).join('')
+      : `<span class="no-members">пока никого нет</span>`;
 
-    const joinOrLeaveBtn = isMember
-      ? `<button class="btn-action btn-glass" onclick="leaveRole('${role.name}')">Выйти</button>`
-      : `<button class="btn-action btn-blue" onclick="joinRole('${role.name}')">Вступить</button>`;
+    const joinBtn = isMember
+      ? `<button class="btn-secondary grow" onclick="leaveRole('${esc(role.name)}')">Выйти</button>`
+      : `<button class="btn-primary grow" onclick="joinRole('${esc(role.name)}')">Вступить</button>`;
 
     card.innerHTML = `
-      <div class="role-header-row">
+      <div class="role-card-top">
         <div class="role-identity">
-          <div class="role-emoji-box">${roleIcon}</div>
-          <div class="role-name-text">${escapeHtml(role.name)}</div>
+          <div class="role-emoji">${icon}</div>
+          <div class="role-name">${esc(role.name)}</div>
         </div>
-        <span class="member-count-tag">${role.members.length} чел.</span>
+        <span class="role-count">${role.members.length}</span>
       </div>
-      <div class="members-flex">${membersHtml}</div>
-      <div class="role-action-row">
-        ${joinOrLeaveBtn}
-        <button class="btn-action btn-glass btn-icon-only" onclick="openMemberModal('${role.name}')" title="Участники">👤+</button>
-        <button class="btn-action btn-glass btn-icon-only" onclick="shareRoleLink('${role.name}')" title="Ссылка">🔗</button>
-        <button class="btn-action btn-danger-glass" onclick="deleteRole('${role.name}')" title="Удалить">🗑</button>
+      <div class="members-wrap">${membersHtml}</div>
+      <div class="role-actions">
+        ${joinBtn}
+        <button class="btn-icon" onclick="openMemberModal('${esc(role.name)}')" title="Участники">👤+</button>
+        <button class="btn-icon" onclick="shareRoleLink('${esc(role.name)}')" title="Скопировать ссылку">🔗</button>
+        <button class="btn-danger" onclick="deleteRole('${esc(role.name)}')" title="Удалить">🗑</button>
       </div>
     `;
-
     frag.appendChild(card);
   });
-
   container.appendChild(frag);
 }
 
-function filterRoles() {
-  const query = document.getElementById('search-input').value.toLowerCase().trim();
-  renderRoles(allRolesCache.filter(r => r.name.toLowerCase().includes(query)));
+// ---- Emoji select ----
+function selectEmoji(el, emoji) {
+  haptic('light');
+  document.querySelectorAll('.emoji-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  selectedRoleEmoji = emoji;
 }
 
-// ---- Fetch chat members ----
+// ---- Create role ----
+async function createNewRole() {
+  const input = document.getElementById('new-role-input');
+  const name = input.value.trim();
+  if (!name) { toast('Введите название роли'); return; }
+  haptic('medium');
+  try {
+    const data = await apiPost('/api/create', {
+      chat_id: parseInt(chatId), role_name: name, emoji: selectedRoleEmoji
+    });
+    if (data.status === 'success') {
+      toast(`${selectedRoleEmoji} Роль "${name}" создана`);
+      input.value = '';
+      switchTab('roles', document.querySelector('.nav-btn[data-tab="roles"]'));
+      fetchRoles();
+    } else { toast('Такая роль уже есть'); }
+  } catch { toast('Ошибка соединения'); }
+}
+
+// ---- Join / Leave ----
+async function joinRole(name) {
+  haptic('light');
+  const username = currentUser.username ? `@${currentUser.username}` : currentUser.first_name;
+  try {
+    const data = await apiPost('/api/join', {
+      chat_id: parseInt(chatId), role_name: name,
+      user_id: currentUser.id, username
+    });
+    if (data.status === 'success') { toast(`Вступил в ${name}`); fetchRoles(); }
+    else if (data.status === 'already_in') toast('Вы уже в этой роли');
+    else toast('Ошибка');
+  } catch { toast('Ошибка соединения'); }
+}
+
+async function leaveRole(name) {
+  haptic('light');
+  try {
+    const data = await apiPost('/api/leave', {
+      chat_id: parseInt(chatId), role_name: name, user_id: currentUser.id
+    });
+    if (data.status === 'success') { toast(`Покинул ${name}`); fetchRoles(); }
+  } catch { toast('Ошибка соединения'); }
+}
+
+function shareRoleLink(name) {
+  haptic('medium');
+  const url = chatId
+    ? `https://t.me/tegerrbot?start=join_${name}_${chatId}`
+    : `https://t.me/tegerrbot?start=join_${name}`;
+  navigator.clipboard?.writeText(url).then(() => toast(`🔗 Ссылка на "${name}" скопирована`));
+}
+
+async function deleteRole(name) {
+  if (!confirm(`Удалить роль "${name}"?`)) return;
+  haptic('medium');
+  try {
+    const data = await apiPost('/api/delete', { chat_id: parseInt(chatId), role_name: name });
+    if (data.status === 'success') { toast(`Роль "${name}" удалена`); fetchRoles(); }
+  } catch { toast('Ошибка соединения'); }
+}
+
+// ---- Chat members (Roster) ----
 async function fetchChatMembers() {
   if (!chatId) return;
   try {
@@ -221,37 +312,30 @@ async function fetchChatMembers() {
     const data = await res.json();
     chatMembersCache = data.members || [];
     renderRoster(chatMembersCache);
-  } catch (e) {
-    console.error('Ошибка участников:', e);
-  }
+  } catch {}
 }
 
-// ---- Render roster (DocumentFragment) ----
 function renderRoster(members) {
-  const container = document.getElementById('roster-list');
-  container.innerHTML = '';
-
-  if (members.length === 0) {
-    container.innerHTML = `<div class="loader-text">Участники не найдены</div>`;
-    return;
-  }
+  const el = document.getElementById('roster-list');
+  el.innerHTML = '';
+  if (!members.length) { el.innerHTML = `<div class="loader-state">Участников нет</div>`; return; }
 
   const frag = document.createDocumentFragment();
   members.forEach(m => {
     const row = document.createElement('div');
-    row.className = 'list-row-item';
-
-    const rolesBadges = m.roles.length > 0
-      ? m.roles.map(r => `<span style="background:rgba(255,255,255,0.06);border:1px solid var(--card-border);font-size:11px;padding:3px 8px;border-radius:6px;color:var(--text-dim);">🛡️ ${escapeHtml(r)}</span>`).join(' ')
-      : `<span style="font-size:11px;color:var(--text-dim);">без ролей</span>`;
-
+    row.className = 'list-item';
+    const rolesTags = m.roles?.length
+      ? m.roles.map(r => `<span style="font-size:11px;background:var(--surface-hover);border:1px solid var(--border);padding:2px 7px;border-radius:5px;margin-right:3px;">🛡️${esc(r)}</span>`).join('')
+      : `<span style="font-size:11px;color:var(--text-3)">без ролей</span>`;
     row.innerHTML = `
-      <div style="display:flex;align-items:center;gap:8px;font-weight:600;">👤 ${escapeHtml(m.username)}</div>
-      <div style="display:flex;gap:4px;flex-wrap:wrap;">${rolesBadges}</div>
+      <div style="min-width:0;flex:1">
+        <div class="list-item-main">👤 ${esc(m.username)}</div>
+        <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:3px">${rolesTags}</div>
+      </div>
     `;
     frag.appendChild(row);
   });
-  container.appendChild(frag);
+  el.appendChild(frag);
 }
 
 // ---- Audit logs ----
@@ -260,128 +344,124 @@ async function fetchAuditLogs() {
   try {
     const res = await fetch(`/api/audit_logs?chat_id=${chatId}`);
     const data = await res.json();
-    renderAuditLogs(data.logs || []);
-  } catch (e) {
-    console.error('Ошибка истории:', e);
-  }
+    renderLogs(data.logs || []);
+  } catch {}
 }
 
-function renderAuditLogs(logs) {
-  const container = document.getElementById('logs-list');
-  container.innerHTML = '';
-
-  if (logs.length === 0) {
-    container.innerHTML = `<div class="loader-text">История пока пуста</div>`;
-    return;
-  }
+function renderLogs(logs) {
+  const el = document.getElementById('logs-list');
+  el.innerHTML = '';
+  if (!logs.length) { el.innerHTML = `<div class="loader-state">История пуста</div>`; return; }
 
   const frag = document.createDocumentFragment();
   logs.forEach(l => {
     const row = document.createElement('div');
-    row.className = 'list-row-item';
+    row.className = 'list-item';
     row.innerHTML = `
-      <div style="display:flex;justify-content:space-between;width:100%;font-weight:600;">
-        <span>${escapeHtml(l.username)} ➔ ${escapeHtml(l.action)}</span>
-        <span style="font-size:11px;color:var(--text-dim);">${escapeHtml(l.time)}</span>
+      <div style="min-width:0;flex:1">
+        <div class="list-item-main">${esc(l.username)} → ${esc(l.action)}</div>
+        ${l.details ? `<div class="list-item-sub">${esc(l.details)}</div>` : ''}
       </div>
-      <div style="font-size:12px;color:var(--text-dim);margin-top:2px;">${escapeHtml(l.details || '')}</div>
+      <div class="list-item-side">${esc(l.time)}</div>
     `;
     frag.appendChild(row);
   });
-  container.appendChild(frag);
+  el.appendChild(frag);
 }
 
 // ---- Achievements ----
+const ACH_ICONS = { first_join:'🛡️', multiclass:'🎭', party_starter:'🎉', party_hero:'⚡', sheriff:'👑', night_shift:'🌙', role_master:'🔥' };
+
 async function fetchAchievements() {
   if (!chatId || !currentUser.id) return;
   try {
     const res = await fetch(`/api/achievements?chat_id=${chatId}&user_id=${currentUser.id}`);
     const data = await res.json();
-    const achs = data.achievements || [];
-
-    const container = document.getElementById('achievements-list');
-    container.innerHTML = '';
-    const frag = document.createDocumentFragment();
-    achs.forEach(a => {
-      const div = document.createElement('div');
-      div.className = `ach-card ${a.unlocked ? 'unlocked' : ''}`;
-      div.innerHTML = `
-        <div class="ach-title-row">
-          <div class="ach-title">${escapeHtml(a.title)}</div>
-          <div class="ach-status">${a.unlocked ? '✅ Получено' : '🔒 Заблокировано'}</div>
-        </div>
-        <div class="ach-desc">${escapeHtml(a.desc)}</div>
-      `;
-      frag.appendChild(div);
-    });
-    container.appendChild(frag);
-  } catch (e) {
-    console.error('Ошибка загрузки ачивок:', e);
-  }
+    renderAchievements(data.achievements || []);
+  } catch {}
 }
 
-// ---- Admin stats ----
+function renderAchievements(achs) {
+  const el = document.getElementById('achievements-list');
+  el.innerHTML = '';
+  if (!achs.length) { el.innerHTML = `<div class="loader-state">Ачивок пока нет</div>`; return; }
+
+  const frag = document.createDocumentFragment();
+  achs.forEach(a => {
+    const div = document.createElement('div');
+    div.className = `ach-item${a.unlocked ? ' unlocked' : ''}`;
+    const icon = ACH_ICONS[a.id] || '🏆';
+    div.innerHTML = `
+      <div class="ach-icon">${icon}</div>
+      <div class="ach-body">
+        <div class="ach-name">${esc(a.title)}</div>
+        <div class="ach-desc">${esc(a.desc)}</div>
+      </div>
+      <div class="ach-badge">${a.unlocked ? '✅' : '🔒'}</div>
+    `;
+    frag.appendChild(div);
+  });
+  el.appendChild(frag);
+}
+
+// ---- Admin ----
 async function fetchAdminStats() {
   if (!isOwnerUser) return;
   try {
     const res = await fetch(`/api/admin/stats?user_id=${currentUser.id}`);
     const data = await res.json();
     if (data.stats) {
-      document.getElementById('admin-stat-chats').textContent = data.stats.chats;
-      document.getElementById('admin-stat-roles').textContent = data.stats.roles;
-      document.getElementById('admin-stat-users').textContent = data.stats.users;
-      document.getElementById('admin-stat-logs').textContent = data.stats.logs;
+      animateCount(document.getElementById('admin-stat-chats'), data.stats.chats);
+      animateCount(document.getElementById('admin-stat-roles'), data.stats.roles);
+      animateCount(document.getElementById('admin-stat-users'), data.stats.users);
+      animateCount(document.getElementById('admin-stat-logs'), data.stats.logs);
     }
-  } catch (e) {
-    console.error('Ошибка админ статистики:', e);
-  }
+  } catch {}
+}
+
+function setSendMode(mode) {
+  currentSendMode = mode;
+  haptic('light');
+  document.getElementById('toggle-single').classList.toggle('active', mode === 'single');
+  document.getElementById('toggle-global').classList.toggle('active', mode === 'global');
+  document.getElementById('chat-id-group').style.display = mode === 'global' ? 'none' : 'block';
+  document.getElementById('admin-send-btn').textContent =
+    mode === 'global' ? '📢 Разослать всем чатам' : '🚀 Отправить в чат';
 }
 
 async function sendAdminMessage() {
-  const targetChatId = document.getElementById('admin-chat-id').value.trim();
-  const messageText = document.getElementById('admin-msg-text').value.trim();
-
-  if (!messageText) { showToast('Введите текст сообщения'); return; }
-  if (currentSendMode === 'single' && !targetChatId) { showToast('Укажите Chat ID чата'); return; }
-
-  const isGlobal = (currentSendMode === 'global');
-  if (isGlobal && !confirm('📢 Отправить это сообщение ВО ВСЕ чаты группы бота?')) return;
+  const chatTarget = document.getElementById('admin-chat-id').value.trim();
+  const text = document.getElementById('admin-msg-text').value.trim();
+  if (!text) { toast('Введите текст'); return; }
+  if (currentSendMode === 'single' && !chatTarget) { toast('Укажите Chat ID'); return; }
+  const isGlobal = currentSendMode === 'global';
+  if (isGlobal && !confirm('Разослать ВО ВСЕ чаты?')) return;
 
   const btn = document.getElementById('admin-send-btn');
-  btn.disabled = true;
-  btn.textContent = '⏳ Выполнение рассылки...';
+  btn.disabled = true; btn.textContent = '⏳ Рассылка...';
 
   try {
     const data = await apiPost('/api/admin/send', {
-      user_id: currentUser.id,
-      chat_id: targetChatId,
-      message: messageText,
-      is_global: isGlobal
+      user_id: currentUser.id, chat_id: chatTarget, message: text, is_global: isGlobal
     });
     if (data.status === 'success') {
-      triggerHaptic('medium');
-      showToast(data.message || '✅ Успешно отправлено!');
-      saveDraftMessage();
-    } else {
-      showToast(data.error || 'Ошибка рассылки');
-    }
-  } catch (e) {
-    showToast('Ошибка подключения к серверу');
-  } finally {
+      haptic('medium'); toast(data.message || '✅ Отправлено'); saveDraftMessage();
+    } else toast(data.error || 'Ошибка');
+  } catch { toast('Ошибка соединения'); }
+  finally {
     btn.disabled = false;
-    btn.textContent = isGlobal ? '📢 Запустить МАССОВУЮ рассылку во ВСЕ чаты' : '🚀 Отправить сообщение в чат';
+    btn.textContent = isGlobal ? '📢 Разослать всем чатам' : '🚀 Отправить в чат';
   }
 }
 
 // ---- Member modal ----
 async function openMemberModal(roleName) {
   activeModalRole = roleName;
-  triggerHaptic('medium');
-  document.getElementById('modal-title').textContent = `Участники: ${roleName}`;
+  haptic('medium');
+  document.getElementById('modal-title').textContent = roleName;
   document.getElementById('manual-user-input').value = '';
   document.getElementById('modal-search').value = '';
   document.getElementById('modal-backdrop').classList.add('open');
-
   await fetchChatMembers();
   renderModalMembers(chatMembersCache);
 }
@@ -393,182 +473,79 @@ function closeMemberModal(event) {
 }
 
 function filterModalMembers() {
-  const query = document.getElementById('modal-search').value.toLowerCase().trim();
-  renderModalMembers(chatMembersCache.filter(m => m.username.toLowerCase().includes(query)));
+  const q = document.getElementById('modal-search').value.toLowerCase().trim();
+  renderModalMembers(chatMembersCache.filter(m => m.username.toLowerCase().includes(q)));
 }
 
 function renderModalMembers(members) {
-  const container = document.getElementById('modal-members-list');
-  const targetRole = allRolesCache.find(r => r.name === activeModalRole);
-  const roleMemberIds = targetRole ? targetRole.members.map(m => m.user_id) : [];
-  const roleMemberUsernames = targetRole ? targetRole.members.map(m => (m.username || '').toLowerCase()) : [];
+  const el = document.getElementById('modal-members-list');
+  el.innerHTML = '';
+  if (!members.length) { el.innerHTML = `<div class="loader-state">Список пуст</div>`; return; }
 
-  container.innerHTML = '';
-
-  if (members.length === 0) {
-    container.innerHTML = `<div class="loader-text">Список участников пуст</div>`;
-    return;
-  }
+  const role = allRolesCache.find(r => r.name === activeModalRole);
+  const memberIds = role?.members.map(m => m.user_id) || [];
+  const memberNames = role?.members.map(m => m.username?.toLowerCase()) || [];
 
   const frag = document.createDocumentFragment();
   members.forEach(m => {
-    const inRole = (m.user_id && roleMemberIds.includes(m.user_id)) ||
-                   (m.username && roleMemberUsernames.includes(m.username.toLowerCase()));
+    const inRole = (m.user_id && memberIds.includes(m.user_id)) ||
+                   (m.username && memberNames.includes(m.username.toLowerCase()));
 
-    const div = document.createElement('div');
-    div.style.cssText = 'display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.05);padding:10px 12px;border-radius:10px;border:1px solid var(--card-border);';
+    const row = document.createElement('div');
+    row.className = 'modal-member-row';
 
     const nameEl = document.createElement('div');
-    nameEl.style.cssText = 'display:flex;align-items:center;gap:8px;font-weight:600;';
+    nameEl.className = 'modal-member-name';
     nameEl.textContent = `👤 ${m.username}`;
 
     const btn = document.createElement('button');
     if (inRole) {
-      btn.className = 'btn-action btn-glass';
-      btn.style.cssText = 'flex:initial;min-height:36px;padding:6px 12px;';
+      btn.className = 'btn-secondary';
+      btn.style.cssText = 'min-height:36px;padding:0 12px;font-size:12px;';
       btn.textContent = '✅ В роли';
-      btn.onclick = () => toggleRoleUser(activeModalRole, m.user_id, m.username, false);
+      btn.onclick = () => toggleMember(activeModalRole, m.user_id, m.username, false);
     } else {
-      btn.className = 'btn-action btn-blue';
-      btn.style.cssText = 'flex:initial;min-height:36px;padding:6px 12px;';
+      btn.className = 'btn-primary';
+      btn.style.cssText = 'min-height:36px;padding:0 12px;font-size:12px;';
       btn.textContent = '+ Добавить';
-      btn.onclick = () => toggleRoleUser(activeModalRole, m.user_id, m.username, true);
+      btn.onclick = () => toggleMember(activeModalRole, m.user_id, m.username, true);
     }
 
-    div.appendChild(nameEl);
-    div.appendChild(btn);
-    frag.appendChild(div);
+    row.appendChild(nameEl);
+    row.appendChild(btn);
+    frag.appendChild(row);
   });
-
-  container.appendChild(frag);
+  el.appendChild(frag);
 }
 
-async function toggleRoleUser(roleName, userId, username, shouldAdd) {
-  triggerHaptic('light');
+async function toggleMember(roleName, userId, username, add) {
+  haptic('light');
   try {
-    const endpoint = shouldAdd ? '/api/join' : '/api/leave';
-    const data = await apiPost(endpoint, {
-      chat_id: parseInt(chatId),
-      role_name: roleName,
-      user_id: userId,
-      username: username
+    const data = await apiPost(add ? '/api/join' : '/api/leave', {
+      chat_id: parseInt(chatId), role_name: roleName, user_id: userId, username
     });
     if (data.status === 'success') {
-      showToast(shouldAdd ? `${username} добавлен` : `${username} удалён`);
+      toast(add ? `${username} добавлен` : `${username} удалён`);
       await fetchRoles();
       await fetchChatMembers();
       renderModalMembers(chatMembersCache);
     }
-  } catch (e) {
-    showToast('Ошибка операции');
-  }
+  } catch { toast('Ошибка'); }
 }
 
 async function addManualUser() {
-  const input = document.getElementById('manual-user-input');
-  const val = input.value.trim();
+  const inp = document.getElementById('manual-user-input');
+  const val = inp.value.trim();
   if (!val || !activeModalRole) return;
-  const cleanUn = val.startsWith('@') ? val : `@${val}`;
-  await toggleRoleUser(activeModalRole, null, cleanUn, true);
-  input.value = '';
+  const clean = val.startsWith('@') ? val : `@${val}`;
+  await toggleMember(activeModalRole, null, clean, true);
+  inp.value = '';
 }
 
-// ---- Role actions ----
-async function joinRole(roleName) {
-  triggerHaptic('light');
-  const username = currentUser.username ? `@${currentUser.username}` : currentUser.first_name;
-  try {
-    const data = await apiPost('/api/join', {
-      chat_id: parseInt(chatId),
-      role_name: roleName,
-      user_id: currentUser.id,
-      username
-    });
-    if (data.status === 'success') {
-      showToast(`Вы вступили в ${roleName}`);
-      fetchRoles();
-    } else if (data.status === 'already_in') {
-      showToast(`Вы уже в роли ${roleName}`);
-    }
-  } catch (e) {
-    showToast('Ошибка подключения');
-  }
-}
-
-async function leaveRole(roleName) {
-  triggerHaptic('light');
-  try {
-    const data = await apiPost('/api/leave', {
-      chat_id: parseInt(chatId),
-      role_name: roleName,
-      user_id: currentUser.id
-    });
-    if (data.status === 'success') {
-      showToast(`Вы покинули ${roleName}`);
-      fetchRoles();
-    }
-  } catch (e) {
-    showToast('Ошибка подключения');
-  }
-}
-
-function shareRoleLink(roleName) {
-  triggerHaptic('medium');
-  const botUsername = 'tegerrbot';
-  const shareUrl = chatId
-    ? `https://t.me/${botUsername}?start=join_${roleName}_${chatId}`
-    : `https://t.me/${botUsername}?start=join_${roleName}`;
-  navigator.clipboard.writeText(shareUrl).then(() => {
-    showToast(`🔗 Ссылка на роль ${roleName} скопирована!`);
-  });
-}
-
-async function createNewRole() {
-  const input = document.getElementById('new-role-input');
-  const roleName = input.value.trim();
-  if (!roleName) { showToast('Введите название роли'); return; }
-
-  triggerHaptic('medium');
-  try {
-    const data = await apiPost('/api/create', {
-      chat_id: parseInt(chatId),
-      role_name: roleName,
-      emoji: selectedRoleEmoji
-    });
-    if (data.status === 'success') {
-      showToast(`Роль ${selectedRoleEmoji} ${roleName} создана`);
-      input.value = '';
-      switchTab('roles');
-      fetchRoles();
-    } else {
-      showToast('Такая роль уже есть');
-    }
-  } catch (e) {
-    showToast('Ошибка подключения');
-  }
-}
-
-async function deleteRole(roleName) {
-  if (!confirm(`Удалить роль "${roleName}"?`)) return;
-  triggerHaptic('medium');
-  try {
-    const data = await apiPost('/api/delete', {
-      chat_id: parseInt(chatId),
-      role_name: roleName
-    });
-    if (data.status === 'success') {
-      showToast(`Роль ${roleName} удалена`);
-      fetchRoles();
-    }
-  } catch (e) {
-    showToast('Ошибка подключения');
-  }
-}
-
-// ---- PC wheel scroll for horizontal lists ----
-document.querySelectorAll('.emoji-grid-select, .preset-chips').forEach(el => {
+// ---- PC scroll for emoji ----
+document.querySelectorAll('.emoji-row').forEach(el => {
   el.addEventListener('wheel', e => {
-    if (e.deltaY !== 0) { e.preventDefault(); el.scrollLeft += e.deltaY; }
+    if (e.deltaY) { e.preventDefault(); el.scrollLeft += e.deltaY; }
   }, { passive: false });
 });
 

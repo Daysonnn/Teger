@@ -1,238 +1,270 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Teger — Ролевой Менеджер</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400..800;1,400..800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Teger</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <!-- Аврора фон (стиль dayson.lol) -->
-    <div class="aurora-bg">
-        <div class="aurora-blob blob-1"></div>
-        <div class="aurora-blob blob-2"></div>
+  <!-- Фон -->
+  <div class="aurora-bg">
+    <div class="aurora-blob blob-1"></div>
+    <div class="aurora-blob blob-2"></div>
+  </div>
+
+  <!-- Pull-to-refresh индикатор -->
+  <div id="pull-indicator" class="pull-indicator">
+    <div class="pull-spinner"></div>
+    <span>Обновление...</span>
+  </div>
+
+  <!-- Основной контент -->
+  <div class="page-container">
+
+    <!-- ТАБ: Роли -->
+    <div id="tab-roles" class="tab-page active">
+      <div class="page-header">
+        <div class="page-header-left">
+          <img src="/assets/teger.png" class="header-logo" alt="Teger" onerror="this.style.display='none'">
+          <div>
+            <div class="header-title">Роли</div>
+            <div class="header-sub" id="chat-info">Синхронизация...</div>
+          </div>
+        </div>
+        <div class="user-chip" id="user-chip">👤 <span id="user-display-name">...</span></div>
+      </div>
+
+      <div class="search-wrap">
+        <div class="search-inner">
+          <svg class="search-ico" viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="6" stroke="currentColor" stroke-width="1.8"/><path d="m15 15 3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <input type="text" id="search-input" class="search-field" placeholder="Поиск роли..." oninput="filterRoles()">
+        </div>
+      </div>
+
+      <div id="roles-list" class="roles-feed">
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+      </div>
     </div>
 
-    <div class="app-wrapper">
-        <!-- Шапка -->
-        <div class="top-header">
-            <div class="brand-title">
-                <img src="/assets/teger.png" class="brand-logo-img" alt="Teger Avatar">
-                <div class="brand-text">
-                    <h1>Teger Roles</h1>
-                    <p id="chat-info">Синхронизация...</p>
-                </div>
-            </div>
-            <div class="user-pill">
-                👤 <span id="user-display-name">Гость</span>
-            </div>
+    <!-- ТАБ: Создать -->
+    <div id="tab-create" class="tab-page">
+      <div class="page-header">
+        <div class="page-header-left">
+          <div class="header-title">Создать роль</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-label">Иконка роли</div>
+        <div class="emoji-row" id="emoji-picker">
+          <button class="emoji-btn active" onclick="selectEmoji(this,'🛡️')">🛡️</button>
+          <button class="emoji-btn" onclick="selectEmoji(this,'💻')">💻</button>
+          <button class="emoji-btn" onclick="selectEmoji(this,'🎨')">🎨</button>
+          <button class="emoji-btn" onclick="selectEmoji(this,'🎮')">🎮</button>
+          <button class="emoji-btn" onclick="selectEmoji(this,'⚡')">⚡</button>
+          <button class="emoji-btn" onclick="selectEmoji(this,'🚀')">🚀</button>
+          <button class="emoji-btn" onclick="selectEmoji(this,'👑')">👑</button>
+          <button class="emoji-btn" onclick="selectEmoji(this,'🔥')">🔥</button>
+          <button class="emoji-btn" onclick="selectEmoji(this,'🎯')">🎯</button>
+          <button class="emoji-btn" onclick="selectEmoji(this,'🎵')">🎵</button>
+          <button class="emoji-btn" onclick="selectEmoji(this,'🧠')">🧠</button>
+          <button class="emoji-btn" onclick="selectEmoji(this,'💎')">💎</button>
         </div>
 
-        <!-- Плавающая Навигация (Pill Nav) -->
-        <div class="nav-pill-wrapper">
-            <button class="nav-item-btn active" onclick="switchTab('roles', this)">🛡️ Роли</button>
-            <button class="nav-item-btn" onclick="switchTab('create', this)">➕ Создать</button>
-            <button class="nav-item-btn" onclick="switchTab('stats', this)">📊 Состав</button>
-            <button class="nav-item-btn" onclick="switchTab('achievements', this)">🏆 Ачивки</button>
-            <button class="nav-item-btn" onclick="switchTab('logs', this)">📜 История</button>
-            <button class="nav-item-btn admin-tab" id="admin-tab-btn" onclick="switchTab('admin', this)">⚡ Админка</button>
+        <div class="field-wrap">
+          <label class="field-label">Название роли</label>
+          <input type="text" id="new-role-input" class="field-input" placeholder="dev, streamer, admin...">
         </div>
 
-        <!-- ТАБ 1: Роли -->
-        <div id="tab-roles" class="tab-content active">
-            <div class="search-container">
-                <span class="search-icon-inside">🔍</span>
-                <input type="text" id="search-input" class="search-input" placeholder="Поиск по названию роли..." oninput="filterRoles()">
-            </div>
-            <div id="roles-list" class="roles-list-container">
-                <div class="loader-text">Загрузка ролей...</div>
-            </div>
-        </div>
-
-        <!-- ТАБ 2: Создать -->
-        <div id="tab-create" class="tab-content">
-            <div class="glass-card">
-                <div class="card-file-header">
-                    <span class="file-icon">📄</span> create_role.json
-                </div>
-                <div class="card-title">Создание новой роли</div>
-                
-                <div class="emoji-grid-select" id="emoji-picker">
-                    <div class="emoji-btn-item active" onclick="selectEmoji(this, '🛡️')">🛡️</div>
-                    <div class="emoji-btn-item" onclick="selectEmoji(this, '💻')">💻</div>
-                    <div class="emoji-btn-item" onclick="selectEmoji(this, '🎨')">🎨</div>
-                    <div class="emoji-btn-item" onclick="selectEmoji(this, '🎮')">🎮</div>
-                    <div class="emoji-btn-item" onclick="selectEmoji(this, '⚡')">⚡</div>
-                    <div class="emoji-btn-item" onclick="selectEmoji(this, '🚀')">🚀</div>
-                    <div class="emoji-btn-item" onclick="selectEmoji(this, '👑')">👑</div>
-                    <div class="emoji-btn-item" onclick="selectEmoji(this, '🔥')">🔥</div>
-                    <div class="emoji-btn-item" onclick="selectEmoji(this, '🎯')">🎯</div>
-                </div>
-
-                <div class="input-group">
-                    <label class="input-label">Название роли</label>
-                    <input type="text" id="new-role-input" class="text-input" placeholder="например: dev или streamer">
-                </div>
-
-                <button class="btn-action btn-blue" style="width: 100%;" onclick="createNewRole()">
-                    ✨ Создать роль
-                </button>
-            </div>
-        </div>
-
-        <!-- ТАБ 3: Состав -->
-        <div id="tab-stats" class="tab-content">
-            <div class="stats-2x2">
-                <div class="stat-box-card">
-                    <div class="stat-tit">Всего ролей</div>
-                    <div id="stat-roles-count" class="stat-val">0</div>
-                </div>
-                <div class="stat-box-card">
-                    <div class="stat-tit">Участников</div>
-                    <div id="stat-members-count" class="stat-val">0</div>
-                </div>
-            </div>
-
-            <div class="glass-card">
-                <div class="card-file-header">
-                    <span class="file-icon">👥</span> members_roster.db
-                </div>
-                <div class="card-title">Участники группы</div>
-                <div id="roster-list">
-                    <div class="loader-text">Загрузка состава...</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- ТАБ 4: История -->
-        <div id="tab-logs" class="tab-content">
-            <div class="glass-card">
-                <div class="card-file-header">
-                    <span class="file-icon">📜</span> audit_history.log
-                </div>
-                <div class="card-title">История изменений чата</div>
-                <div id="logs-list">
-                    <div class="loader-text">Загрузка истории...</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- ТАБ: Достижения -->
-        <div id="tab-achievements" class="tab-content">
-            <div class="glass-card">
-                <div class="card-file-header">
-                    <span class="file-icon">📜</span> achievements.json
-                </div>
-                <div class="card-title">Достижения аккаунта</div>
-                <div id="achievements-list">
-                    <div class="loader-text">Загрузка достижений...</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- ТАБ 5: Админка Владельца (ТОЛЬКО для OWNER) -->
-        <div id="tab-admin" class="tab-content">
-            <!-- Рассылка и Сообщения -->
-            <div class="glass-card">
-                <div class="card-file-header">
-                    <span class="file-icon">📡</span> broadcast_system.sh
-                </div>
-                <div class="card-title">⚡ Центр Уведомлений Владельца</div>
-
-                <!-- Режим рассылки: Одиночный чат VS Массовая рассылка -->
-                <div class="toggle-mode-box">
-                    <button class="toggle-option active" id="toggle-single" onclick="setSendMode('single')">
-                        🎯 Один чат
-                    </button>
-                    <button class="toggle-option" id="toggle-global" onclick="setSendMode('global')">
-                        📢 Массовая рассылка (Все чаты)
-                    </button>
-                </div>
-
-                <!-- Поле Chat ID (Показывается при единичном режиме) -->
-                <div class="input-group" id="chat-id-group">
-                    <label class="input-label">Chat ID группы / канала</label>
-                    <input type="text" id="admin-chat-id" class="text-input" placeholder="-1001234567890">
-                </div>
-
-                <!-- Текст сообщения -->
-                <div class="input-group">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <label class="input-label">Текст сообщения (HTML)</label>
-                        <button style="background:none; border:none; color:var(--accent-blue); font-size:11px; font-weight:700; cursor:pointer;" onclick="restoreLastMessage()">
-                            🔄 Вставить последнее
-                        </button>
-                    </div>
-                    <textarea id="admin-msg-text" class="textarea-input" placeholder="🎉 <b>Привет!</b> Наберите текст..." oninput="saveDraftMessage()"></textarea>
-                </div>
-
-                <button class="btn-action btn-accent" id="admin-send-btn" style="width: 100%; min-height:46px;" onclick="sendAdminMessage()">
-                    🚀 Запустить рассылку
-                </button>
-            </div>
-
-            <!-- Глобальные данные бота -->
-            <div class="glass-card">
-                <div class="card-file-header">
-                    <span class="file-icon">📊</span> system_overview.json
-                </div>
-                <div class="card-title">Глобальная статистика бота</div>
-                <div class="stats-2x2" style="margin-bottom: 0;">
-                    <div class="stat-box-card">
-                        <div class="stat-tit">Чатов в базе</div>
-                        <div id="admin-stat-chats" class="stat-val">-</div>
-                    </div>
-                    <div class="stat-box-card">
-                        <div class="stat-tit">Всего ролей</div>
-                        <div id="admin-stat-roles" class="stat-val">-</div>
-                    </div>
-                    <div class="stat-box-card">
-                        <div class="stat-tit">Участников</div>
-                        <div id="admin-stat-users" class="stat-val">-</div>
-                    </div>
-                    <div class="stat-box-card">
-                        <div class="stat-tit">Записей логов</div>
-                        <div id="admin-stat-logs" class="stat-val">-</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
+        <button class="btn-primary full-width" onclick="createNewRole()">✨ Создать роль</button>
+      </div>
     </div>
 
-    <!-- Модалка управления участниками -->
-    <div id="modal-backdrop" class="modal-overlay" onclick="closeMemberModal(event)">
-        <div class="modal-card-sheet" onclick="event.stopPropagation()">
-            <div class="modal-head">
-                <div id="modal-title" style="font-size:18px; font-weight:700;">Участники роли</div>
-                <button class="close-modal-btn" onclick="closeMemberModal()">✕</button>
-            </div>
-            
-            <div style="display:flex; gap:8px;">
-                <input type="text" id="manual-user-input" class="text-input" placeholder="Добавить @username вручную">
-                <button class="btn-action btn-blue" style="flex: initial;" onclick="addManualUser()">+ Добавить</button>
-            </div>
+    <!-- ТАБ: Состав -->
+    <div id="tab-stats" class="tab-page">
+      <div class="page-header">
+        <div class="header-title">Состав</div>
+      </div>
 
-            <div class="search-container" style="margin-bottom: 0;">
-                <span class="search-icon-inside">🔍</span>
-                <input type="text" id="modal-search" class="search-input" placeholder="Поиск в списке чата..." oninput="filterModalMembers()">
-            </div>
-
-            <div id="modal-members-list" class="modal-scroll-area">
-                <div class="loader-text">Загрузка участников...</div>
-            </div>
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-ico">🛡️</div>
+          <div class="stat-num" id="stat-roles-count">—</div>
+          <div class="stat-label">Ролей</div>
         </div>
+        <div class="stat-card">
+          <div class="stat-ico">👥</div>
+          <div class="stat-num" id="stat-members-count">—</div>
+          <div class="stat-label">Участников</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title-row">
+          <span class="card-title">Участники чата</span>
+          <span class="card-mono">members.db</span>
+        </div>
+        <div id="roster-list" class="list-feed">
+          <div class="loader-state">Загрузка...</div>
+        </div>
+      </div>
     </div>
 
-    <div id="toast" class="toast-popup"></div>
+    <!-- ТАБ: Ачивки -->
+    <div id="tab-achievements" class="tab-page">
+      <div class="page-header">
+        <div class="header-title">Достижения</div>
+      </div>
+      <div id="achievements-list" class="achievements-feed">
+        <div class="loader-state">Загрузка...</div>
+      </div>
+    </div>
 
-    
-<script src="app.js"></script>
+    <!-- ТАБ: История -->
+    <div id="tab-logs" class="tab-page">
+      <div class="page-header">
+        <div class="header-title">История</div>
+      </div>
+      <div class="card">
+        <div class="card-title-row">
+          <span class="card-title">Лог изменений</span>
+          <span class="card-mono">audit.log</span>
+        </div>
+        <div id="logs-list" class="list-feed">
+          <div class="loader-state">Загрузка...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ТАБ: Админка -->
+    <div id="tab-admin" class="tab-page">
+      <div class="page-header">
+        <div class="header-title">⚡ Панель владельца</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title-row">
+          <span class="card-title">Рассылка</span>
+          <span class="card-mono">broadcast.sh</span>
+        </div>
+
+        <div class="toggle-row">
+          <button class="toggle-btn active" id="toggle-single" onclick="setSendMode('single')">🎯 Один чат</button>
+          <button class="toggle-btn" id="toggle-global" onclick="setSendMode('global')">📢 Все чаты</button>
+        </div>
+
+        <div id="chat-id-group" class="field-wrap">
+          <label class="field-label">Chat ID</label>
+          <input type="text" id="admin-chat-id" class="field-input" placeholder="-1001234567890">
+        </div>
+
+        <div class="field-wrap">
+          <div class="field-label-row">
+            <label class="field-label">Текст (HTML)</label>
+            <button class="link-btn" onclick="restoreLastMessage()">🔄 Вставить</button>
+          </div>
+          <textarea id="admin-msg-text" class="field-textarea" placeholder="🎉 <b>Привет!</b>" oninput="saveDraftMessage()"></textarea>
+        </div>
+
+        <button class="btn-primary btn-red full-width" id="admin-send-btn" onclick="sendAdminMessage()">
+          🚀 Запустить рассылку
+        </button>
+      </div>
+
+      <div class="card">
+        <div class="card-title-row">
+          <span class="card-title">Статистика бота</span>
+          <span class="card-mono">system.json</span>
+        </div>
+        <div class="stats-row" style="margin-bottom:0">
+          <div class="stat-card compact">
+            <div class="stat-num" id="admin-stat-chats">—</div>
+            <div class="stat-label">Чатов</div>
+          </div>
+          <div class="stat-card compact">
+            <div class="stat-num" id="admin-stat-roles">—</div>
+            <div class="stat-label">Ролей</div>
+          </div>
+          <div class="stat-card compact">
+            <div class="stat-num" id="admin-stat-users">—</div>
+            <div class="stat-label">Юзеров</div>
+          </div>
+          <div class="stat-card compact">
+            <div class="stat-num" id="admin-stat-logs">—</div>
+            <div class="stat-label">Логов</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /page-container -->
+
+  <!-- Нижняя навигация -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" onclick="switchTab('roles',this)" data-tab="roles">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none"><path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.35C17.25 22.15 21 17.25 21 12V7L12 2z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <span>Роли</span>
+    </button>
+    <button class="nav-btn" onclick="switchTab('create',this)" data-tab="create">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <span>Создать</span>
+    </button>
+    <button class="nav-btn" onclick="switchTab('stats',this)" data-tab="stats">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none"><path d="M17 21V13M12 21V9M7 21v-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <span>Состав</span>
+    </button>
+    <button class="nav-btn" onclick="switchTab('achievements',this)" data-tab="achievements">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="5" stroke="currentColor" stroke-width="1.8"/><path d="M8 13.5l-2 7 6-3 6 3-2-7" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <span>Ачивки</span>
+    </button>
+    <button class="nav-btn" onclick="switchTab('logs',this)" data-tab="logs">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>История</span>
+    </button>
+    <button class="nav-btn admin-nav-btn" id="admin-tab-btn" onclick="switchTab('admin',this)" data-tab="admin" style="display:none">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none"><polygon points="13,2 3,14 12,14 11,22 21,10 12,10" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <span>Админ</span>
+    </button>
+  </nav>
+
+  <!-- Модалка участников -->
+  <div id="modal-backdrop" class="modal-overlay" onclick="closeMemberModal(event)">
+    <div class="modal-sheet" onclick="event.stopPropagation()">
+      <div class="modal-drag-handle"></div>
+      <div class="modal-header">
+        <div id="modal-title" class="modal-title">Участники</div>
+        <button class="modal-close-btn" onclick="closeMemberModal()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="modal-actions-row">
+        <input type="text" id="manual-user-input" class="field-input" placeholder="Добавить @username вручную">
+        <button class="btn-primary compact-btn" onclick="addManualUser()">+</button>
+      </div>
+
+      <div class="search-wrap" style="padding:0;margin-bottom:12px">
+        <div class="search-inner">
+          <svg class="search-ico" viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="6" stroke="currentColor" stroke-width="1.8"/><path d="m15 15 3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <input type="text" id="modal-search" class="search-field" placeholder="Поиск в участниках..." oninput="filterModalMembers()">
+        </div>
+      </div>
+
+      <div id="modal-members-list" class="modal-list"></div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast"></div>
+
+  <script src="app.js"></script>
 </body>
 </html>
