@@ -562,6 +562,16 @@ async def update_party_slots(party_id: int, new_max_slots: int) -> dict | None:
         await conn.commit()
     return await get_party(party_id)
 
+async def update_party_title(party_id: int, new_title: str) -> dict | None:
+    """Изменяет название пати."""
+    clean_title = new_title.strip()
+    if not clean_title:
+        return None
+    async with get_db() as conn:
+        await conn.execute('UPDATE parties SET title = ? WHERE id = ?', (clean_title, party_id))
+        await conn.commit()
+    return await get_party(party_id)
+
 async def cleanup_old_parties():
     """Автоматически очищает старые (>12ч) или завершенные/отмененные пати из базы данных."""
     async with get_db() as conn:

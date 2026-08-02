@@ -797,6 +797,44 @@ async def create_party_cmd(message: Message, command: CommandObject):
     # Ачивка за первый стак
     await db.unlock_achievement(message.chat.id, user.id, "party_starter")
 
+@router.message(Command("party_title"))
+async def change_party_title_cmd(message: Message, command: CommandObject, bot: Bot):
+    if not await is_group(message): return
+    if not command.args:
+        await message.reply("💡 Использование: ответом на карточку сбора укажите <code>/party_title Новое название</code>", parse_mode=ParseMode.HTML)
+        return
+
+    if not message.reply_to_message:
+        await message.reply("⚠️ Отправьте эту команду ответом на карточку сбора пати!", parse_mode=ParseMode.HTML)
+        return
+
+    reply_msg_id = message.reply_to_message.message_id
+    async with db.get_db() as conn:
+        cursor = await conn.execute('SELECT id, creator_id FROM parties WHERE chat_id = ? AND message_id = ?', (message.chat.id, reply_msg_id))
+        p = await cursor.fetchone()
+
+    if not p:
+        await message.reply("❌ Сбор не найден или уже завершен.")
+        return
+
+    party_id, creator_id = p[0], p[1]
+    is_creator = (message.from_user.id == creator_id)
+    is_admin = await check_admin(bot, message)
+
+    if not is_creator and not is_admin:
+        await message.reply("⛔ Изменить название может только организатор сбора!")
+        return
+
+    new_title = command.args.strip()
+    updated_party = await db.update_party_title(party_id, new_title)
+    if updated_party:
+        text, kb = format_party_message(updated_party)
+        try:
+            await bot.edit_message_text(text, chat_id=message.chat.id, message_id=reply_msg_id, parse_mode=ParseMode.HTML, reply_markup=kb)
+            await message.reply(f"✅ Название сбора успешно изменено на «{html.escape(new_title)}»!", parse_mode=ParseMode.HTML)
+        except Exception:
+            await message.reply(f"✅ Название изменено на «{html.escape(new_title)}»!", parse_mode=ParseMode.HTML)
+
 @router.callback_query(F.data.startswith("pty:"))
 async def handle_party_callback(callback: CallbackQuery, bot: Bot):
     parts = callback.data.split(":")
@@ -873,6 +911,59 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
             [
                 InlineKeyboardButton(text="➕ Место", callback_data=f"pty:inc_slots:{party_id}"),
                 InlineKeyboardButton(text="➖ Место", callback_data=f"pty:dec_slots:{party_id}")
+            ],
+            [
+                InlineKeyboardButton(text="✏️ Изменить название", callback_data=f"pty:title_menu:{party_id}")
+            ],
+            [
+                InlineKeyboardButton(text="👤 Исключить участника", callback_data=f"pty:kick_menu:{party_id}")
+            ],
+            [
+                InlineKeyboardButton(text="◀️ Назад к сбору", callback_data=f"pty:refresh:{party_id}")
+            ]
+        ])
+        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        return
+
+    elif action == "title_menu":
+        if not is_creator and not is_admin: return
+        text = f"<b>Выберите готовое название или укажите свое:</b>\n\n<i>Для своего названия отправьте ответом на карточку сбора:</i>\n<code>/party_title Ваше название</code>"
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🎮 CS2", callback_data=f"pty:set_t:{party_id}:CS2"),
+                InlineKeyboardButton(text="🎮 Dota 2", callback_data=f"pty:set_t:{party_id}:Dota 2")
+            ],
+            [
+                InlineKeyboardButton(text="🎮 Valorant", callback_data=f"pty:set_t:{party_id}:Valorant"),
+                InlineKeyboardButton(text="🎬 Фильм", callback_data=f"pty:set_t:{party_id}:Фильм")
+            ],
+            [
+                InlineKeyboardButton(text="💬 Общение", callback_data=f"pty:set_t:{party_id}:Общение"),
+                InlineKeyboardButton(text="🎨 Проект", callback_data=f"pty:set_t:{party_id}:Проект")
+            ],
+            [
+                InlineKeyboardButton(text="◀️ Назад в настройки", callback_data=f"pty:settings:{party_id}")
+            ]
+        ])
+        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        return
+
+    elif action == "set_t":
+        if not is_creator and not is_admin: return
+        new_title = parts[3]
+        updated = await db.update_party_title(party_id, new_title)
+        if updated:
+            party_data = updated
+            await callback.answer(f"✅ Название изменено на «{new_title}»")
+        # Возвращаем меню настроек
+        text = f"<b>⚙️ Настройки сбора: {html.escape(party_data['title'])}</b>\nТекущее число мест: <b>{party_data['max_slots']}</b> (Занято: {len(party_data['members'])})"
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="➕ Место", callback_data=f"pty:inc_slots:{party_id}"),
+                InlineKeyboardButton(text="➖ Место", callback_data=f"pty:dec_slots:{party_id}")
+            ],
+            [
+                InlineKeyboardButton(text="✏️ Изменить название", callback_data=f"pty:title_menu:{party_id}")
             ],
             [
                 InlineKeyboardButton(text="👤 Исключить участника", callback_data=f"pty:kick_menu:{party_id}")
