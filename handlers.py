@@ -756,7 +756,7 @@ def format_party_message(party: dict) -> tuple[str, InlineKeyboardMarkup | None]
             InlineKeyboardButton(text="Выйти", callback_data=f"pty:leave:{party['id']}")
         ],
         [
-            InlineKeyboardButton(text="⚙️ Настройки", callback_data=f"pty:settings:{party['id']}"),
+            InlineKeyboardButton(text="Настройки", callback_data=f"pty:settings:{party['id']}"),
             InlineKeyboardButton(text="Отменить сбор", callback_data=f"pty:cancel:{party['id']}")
         ]
     ])
@@ -845,7 +845,7 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
 
     party_data = await db.get_party(party_id)
     if not party_data:
-        await callback.answer("❌ Сбор отменен или устарел.", show_alert=True)
+        await callback.answer("Сбор закрыт или не найден.", show_alert=True)
         return
 
     is_creator = (user.id == party_data["creator_id"])
@@ -854,25 +854,23 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
     if action == "join":
         res, party_data = await db.join_party(party_id, user.id, username)
         if res == "already_in":
-            await callback.answer("⚠️ Вы уже состоите в этом пати!", show_alert=True)
+            await callback.answer("Вы уже состоите в этой группе.", show_alert=True)
             return
         elif res == "full":
-            await callback.answer("❌ Свободных слотов больше нет!", show_alert=True)
+            await callback.answer("Мест больше нет.", show_alert=True)
             return
         elif res == "closed" or res == "not_found":
-            await callback.answer("❌ Этот сбор пати уже закрыт или отменен.", show_alert=True)
+            await callback.answer("Сбор закрыт или отменен.", show_alert=True)
             return
 
-        await callback.answer("✅ Вы успешно вступили в пати!")
+        await callback.answer("Вы вступили в группу.")
         await db.unlock_achievement(callback.message.chat.id, user.id, "party_hero")
 
-        # Когда группа заполнилась — отправляем отдельным ответным сообщением громкий призыв всех участников
         if party_data and party_data.get("status") == "completed":
             mentions_all = " ".join([format_user_mention(m["user_id"], m["username"]) for m in party_data["members"]])
             completion_text = (
-                f"🔥 <b>Группа «{html.escape(party_data['title'])}» успешно собрана! ({party_data['max_slots']}/{party_data['max_slots']})</b>\n\n"
-                f"📢 <b>Призыв участников:</b> {mentions_all}\n"
-                f"<i>Все в сборе! Заходите в игру / голосовой канал!</i>"
+                f"<b>Группа «{html.escape(party_data['title'])}» собрана ({party_data['max_slots']}/{party_data['max_slots']})</b>\n\n"
+                f"<b>Призыв участников:</b> {mentions_all}"
             )
             try:
                 await callback.message.reply(completion_text, parse_mode=ParseMode.HTML)
@@ -882,44 +880,44 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
     elif action == "leave":
         res, party_data = await db.leave_party(party_id, user.id)
         if res == "not_in":
-            await callback.answer("⚠️ Вас нет в составе этого пати.", show_alert=True)
+            await callback.answer("Вас нет в этой группе.", show_alert=True)
             return
         elif res == "not_found":
-            await callback.answer("❌ Пати не найдено.", show_alert=True)
+            await callback.answer("Сбор не найден.", show_alert=True)
             return
 
-        await callback.answer("ℹ️ Вы вышли из пати.")
+        await callback.answer("Вы вышли из группы.")
 
     elif action == "cancel":
         if not is_creator and not is_admin:
-            await callback.answer("⛔ Только организатор или админ может отменить сбор!", show_alert=True)
+            await callback.answer("Доступ только для организатора.", show_alert=True)
             return
 
         _, party_data = await db.cancel_party(party_id, user.id)
-        await callback.answer("❌ Сбор отменен.")
+        await callback.answer("Сбор отменен.")
 
     elif action == "settings":
         if not is_creator and not is_admin:
-            await callback.answer("⛔ Настройки доступны только организатору!", show_alert=True)
+            await callback.answer("Доступ только для организатора.", show_alert=True)
             return
 
         text = (
-            f"<b>⚙️ Настройки сбора: {html.escape(party_data['title'])}</b>\n"
-            f"Текущее число мест: <b>{party_data['max_slots']}</b> (Занято: {len(party_data['members'])})"
+            f"<b>Настройки сбора: {html.escape(party_data['title'])}</b>\n"
+            f"Число мест: <b>{party_data['max_slots']}</b> (Занято: {len(party_data['members'])})"
         )
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="➕ Место", callback_data=f"pty:inc_slots:{party_id}"),
-                InlineKeyboardButton(text="➖ Место", callback_data=f"pty:dec_slots:{party_id}")
+                InlineKeyboardButton(text="+1 слот", callback_data=f"pty:inc_slots:{party_id}"),
+                InlineKeyboardButton(text="-1 слот", callback_data=f"pty:dec_slots:{party_id}")
             ],
             [
-                InlineKeyboardButton(text="✏️ Изменить название", callback_data=f"pty:title_menu:{party_id}")
+                InlineKeyboardButton(text="Изменить название", callback_data=f"pty:title_menu:{party_id}")
             ],
             [
-                InlineKeyboardButton(text="👤 Исключить участника", callback_data=f"pty:kick_menu:{party_id}")
+                InlineKeyboardButton(text="Исключить участника", callback_data=f"pty:kick_menu:{party_id}")
             ],
             [
-                InlineKeyboardButton(text="◀️ Назад к сбору", callback_data=f"pty:refresh:{party_id}")
+                InlineKeyboardButton(text="Назад к сбору", callback_data=f"pty:refresh:{party_id}")
             ]
         ])
         await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -927,50 +925,13 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
 
     elif action == "title_menu":
         if not is_creator and not is_admin: return
-        text = f"<b>Выберите готовое название или укажите свое:</b>\n\n<i>Для своего названия отправьте ответом на карточку сбора:</i>\n<code>/party_title Ваше название</code>"
+        text = (
+            f"<b>Изменение названия сбора:</b>\n\n"
+            f"Отправьте команду ответом на сообщение сбора:\n"
+            f"<code>/party_title Новое название</code>"
+        )
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🎮 CS2", callback_data=f"pty:set_t:{party_id}:CS2"),
-                InlineKeyboardButton(text="🎮 Dota 2", callback_data=f"pty:set_t:{party_id}:Dota 2")
-            ],
-            [
-                InlineKeyboardButton(text="🎮 Valorant", callback_data=f"pty:set_t:{party_id}:Valorant"),
-                InlineKeyboardButton(text="🎬 Фильм", callback_data=f"pty:set_t:{party_id}:Фильм")
-            ],
-            [
-                InlineKeyboardButton(text="💬 Общение", callback_data=f"pty:set_t:{party_id}:Общение"),
-                InlineKeyboardButton(text="🎨 Проект", callback_data=f"pty:set_t:{party_id}:Проект")
-            ],
-            [
-                InlineKeyboardButton(text="◀️ Назад в настройки", callback_data=f"pty:settings:{party_id}")
-            ]
-        ])
-        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
-        return
-
-    elif action == "set_t":
-        if not is_creator and not is_admin: return
-        new_title = parts[3]
-        updated = await db.update_party_title(party_id, new_title)
-        if updated:
-            party_data = updated
-            await callback.answer(f"✅ Название изменено на «{new_title}»")
-        # Возвращаем меню настроек
-        text = f"<b>⚙️ Настройки сбора: {html.escape(party_data['title'])}</b>\nТекущее число мест: <b>{party_data['max_slots']}</b> (Занято: {len(party_data['members'])})"
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="➕ Место", callback_data=f"pty:inc_slots:{party_id}"),
-                InlineKeyboardButton(text="➖ Место", callback_data=f"pty:dec_slots:{party_id}")
-            ],
-            [
-                InlineKeyboardButton(text="✏️ Изменить название", callback_data=f"pty:title_menu:{party_id}")
-            ],
-            [
-                InlineKeyboardButton(text="👤 Исключить участника", callback_data=f"pty:kick_menu:{party_id}")
-            ],
-            [
-                InlineKeyboardButton(text="◀️ Назад к сбору", callback_data=f"pty:refresh:{party_id}")
-            ]
+            [InlineKeyboardButton(text="Назад", callback_data=f"pty:settings:{party_id}")]
         ])
         await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
         return
@@ -980,22 +941,24 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
         updated = await db.update_party_slots(party_id, party_data["max_slots"] + 1)
         if updated:
             party_data = updated
-            await callback.answer("➕ Добавлено место!")
+            await callback.answer("Добавлен 1 слот")
         else:
-            await callback.answer("⚠️ Максимум 10 мест.", show_alert=True)
+            await callback.answer("Максимум 10 мест.", show_alert=True)
             return
-        # Возвращаем меню настроек
-        text = f"<b>⚙️ Настройки сбора: {html.escape(party_data['title'])}</b>\nТекущее число мест: <b>{party_data['max_slots']}</b> (Занято: {len(party_data['members'])})"
+        text = f"<b>Настройки сбора: {html.escape(party_data['title'])}</b>\nЧисло мест: <b>{party_data['max_slots']}</b> (Занято: {len(party_data['members'])})"
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="➕ Место", callback_data=f"pty:inc_slots:{party_id}"),
-                InlineKeyboardButton(text="➖ Место", callback_data=f"pty:dec_slots:{party_id}")
+                InlineKeyboardButton(text="+1 слот", callback_data=f"pty:inc_slots:{party_id}"),
+                InlineKeyboardButton(text="-1 слот", callback_data=f"pty:dec_slots:{party_id}")
             ],
             [
-                InlineKeyboardButton(text="👤 Исключить участника", callback_data=f"pty:kick_menu:{party_id}")
+                InlineKeyboardButton(text="Изменить название", callback_data=f"pty:title_menu:{party_id}")
             ],
             [
-                InlineKeyboardButton(text="◀️ Назад к сбору", callback_data=f"pty:refresh:{party_id}")
+                InlineKeyboardButton(text="Исключить участника", callback_data=f"pty:kick_menu:{party_id}")
+            ],
+            [
+                InlineKeyboardButton(text="Назад к сбору", callback_data=f"pty:refresh:{party_id}")
             ]
         ])
         await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -1006,21 +969,24 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
         updated = await db.update_party_slots(party_id, party_data["max_slots"] - 1)
         if updated:
             party_data = updated
-            await callback.answer("➖ Уменьшено место!")
+            await callback.answer("Уменьшен 1 слот")
         else:
-            await callback.answer("⚠️ Нельзя сделать меньше задействованных мест или меньше 2.", show_alert=True)
+            await callback.answer("Нельзя сделать меньше задействованных мест или меньше 2.", show_alert=True)
             return
-        text = f"<b>⚙️ Настройки сбора: {html.escape(party_data['title'])}</b>\nТекущее число мест: <b>{party_data['max_slots']}</b> (Занято: {len(party_data['members'])})"
+        text = f"<b>Настройки сбора: {html.escape(party_data['title'])}</b>\nЧисло мест: <b>{party_data['max_slots']}</b> (Занято: {len(party_data['members'])})"
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="➕ Место", callback_data=f"pty:inc_slots:{party_id}"),
-                InlineKeyboardButton(text="➖ Место", callback_data=f"pty:dec_slots:{party_id}")
+                InlineKeyboardButton(text="+1 слот", callback_data=f"pty:inc_slots:{party_id}"),
+                InlineKeyboardButton(text="-1 слот", callback_data=f"pty:dec_slots:{party_id}")
             ],
             [
-                InlineKeyboardButton(text="👤 Исключить участника", callback_data=f"pty:kick_menu:{party_id}")
+                InlineKeyboardButton(text="Изменить название", callback_data=f"pty:title_menu:{party_id}")
             ],
             [
-                InlineKeyboardButton(text="◀️ Назад к сбору", callback_data=f"pty:refresh:{party_id}")
+                InlineKeyboardButton(text="Исключить участника", callback_data=f"pty:kick_menu:{party_id}")
+            ],
+            [
+                InlineKeyboardButton(text="Назад к сбору", callback_data=f"pty:refresh:{party_id}")
             ]
         ])
         await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -1030,14 +996,14 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
         if not is_creator and not is_admin: return
         other_members = [m for m in party_data["members"] if m["user_id"] != party_data["creator_id"]]
         if not other_members:
-            await callback.answer("⚠️ В группе пока нет других участников.", show_alert=True)
+            await callback.answer("В группе нет других участников.", show_alert=True)
             return
 
         buttons = [
-            [InlineKeyboardButton(text=f"❌ Кикнуть {m['username']}", callback_data=f"pty:kick:{party_id}:{m['user_id']}")]
+            [InlineKeyboardButton(text=f"Исключить {m['username']}", callback_data=f"pty:kick:{party_id}:{m['user_id']}")]
             for m in other_members
         ]
-        buttons.append([InlineKeyboardButton(text="◀️ Назад в настройки", callback_data=f"pty:settings:{party_id}")])
+        buttons.append([InlineKeyboardButton(text="Назад", callback_data=f"pty:settings:{party_id}")])
 
         text = f"<b>Выберите участника для исключения:</b>"
         await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
@@ -1047,7 +1013,7 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
         if not is_creator and not is_admin: return
         target_uid = int(parts[3])
         _, party_data = await db.leave_party(party_id, target_uid)
-        await callback.answer("❌ Участник исключен из пати.")
+        await callback.answer("Участник исключен из группы.")
 
     if party_data:
         text, kb = format_party_message(party_data)
