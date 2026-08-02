@@ -679,6 +679,157 @@ async def call_all_members(message: Message):
     # Чистое независимое сообщение
     await message.reply(text, parse_mode=ParseMode.HTML)
 
+def format_party_message(party: dict) -> tuple[str, InlineKeyboardMarkup | None]:
+    """Форматирует динамически обновляемое сообщение сбора пати."""
+    title = html.escape(party["title"])
+    creator_name = html.escape(party["creator_name"])
+    max_slots = party["max_slots"]
+    status = party["status"]
+    members = party["members"]
+    joined_count = len(members)
+
+    if status == "cancelled":
+        text = f"❌ <b>СБОР ПАТИ ОТМЕНЕН</b>\n\n<b>Цель:</b> {title}\n<b>Организатор:</b> {creator_name}"
+        return text, None
+
+    if status == "completed":
+        mentions_all = " ".join([format_user_mention(m["user_id"], m["username"]) for m in members])
+        text = (
+            f"🔥 <b>ПАТИ УСПЕШНО СОБРАНО! ({joined_count}/{max_slots})</b>\n"
+            f"────────────────────────\n"
+            f"🎮 <b>Цель:</b> {title}\n"
+            f"👑 <b>Организатор:</b> {creator_name}\n\n"
+            f"👥 <b>Итоговый состав:</b>\n" +
+            "\n".join([f"{i+1}. {format_user_mention(m['user_id'], m['username'])}" for i, m in enumerate(members)]) +
+            f"\n\n📢 <b>Призыв:</b> {mentions_all}\n<i>Все в сборе! Заходите в голосовой канал / игру!</i>"
+        )
+        return text, None
+
+    slots_list = []
+    for i in range(max_slots):
+        if i < joined_count:
+            m = members[i]
+            user_label = format_user_mention(m["user_id"], m["username"])
+            is_creator = (m["user_id"] == party["creator_id"])
+            slots_list.append(f"{i+1}. 👤 {user_label} {'(Организатор)' if is_creator else ''}")
+        else:
+            slots_list.append(f"{i+1}. ⏳ <i>Свободный слот</i>")
+
+    slots_str = "\n".join(slots_list)
+
+    text = (
+        f"🎮 <b>СБОР ПАТИ: {title}</b> ({joined_count}/{max_slots})\n"
+        f"────────────────────────\n"
+        f"👑 <b>Организатор:</b> {creator_name}\n\n"
+        f"👥 <b>Состав команды:</b>\n"
+        f"{slots_str}\n\n"
+        f"💬 <i>Жмите кнопку ниже, чтобы занять свободное место!</i>"
+    )
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="➕ Вступить в пати", callback_data=f"pty:join:{party['id']}"),
+            InlineKeyboardButton(text="➖ Покинуть", callback_data=f"pty:leave:{party['id']}")
+        ],
+        [
+            InlineKeyboardButton(text="❌ Отменить сбор", callback_data=f"pty:cancel:{party['id']}")
+        ]
+    ])
+    return text, kb
+
+@router.message(Command("party"))
+async def create_party_cmd(message: Message, command: CommandObject):
+    if not await is_group(message): return
+
+    args = command.args.split() if command.args else []
+    max_slots = 5
+    title_parts = []
+
+    for arg in args:
+        if arg.isdigit() and 2 <= int(arg) <= 10:
+            max_slots = int(arg)
+        else:
+            title_parts.append(arg)
+
+    title = " ".join(title_parts) if title_parts else "Игровая сессия"
+    user = message.from_user
+    creator_name = f"@{user.username}" if user.username else user.first_name
+
+    party_id = await db.create_party(
+        chat_id=message.chat.id,
+        creator_id=user.id,
+        creator_name=creator_name,
+        title=title,
+        max_slots=max_slots
+    )
+
+    party_data = await db.get_party(party_id)
+    text, kb = format_party_message(party_data)
+
+    msg = await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    await db.set_party_message_id(party_id, msg.message_id)
+
+    # Ачивка за первый стак
+    await db.unlock_achievement(message.chat.id, user.id, "party_starter")
+
+@router.callback_query(F.data.startswith("pty:"))
+async def handle_party_callback(callback: CallbackQuery, bot: Bot):
+    parts = callback.data.split(":")
+    action = parts[1]
+    party_id = int(parts[2])
+    user = callback.from_user
+    username = f"@{user.username}" if user.username else user.first_name
+
+    party_data = None
+    if action == "join":
+        res, party_data = await db.join_party(party_id, user.id, username)
+        if res == "already_in":
+            await callback.answer("⚠️ Вы уже состоите в этом пати!", show_alert=True)
+            return
+        elif res == "full":
+            await callback.answer("❌ Свободных слотов больше нет!", show_alert=True)
+            return
+        elif res == "closed" or res == "not_found":
+            await callback.answer("❌ Этот сбор пати уже закрыт или отменен.", show_alert=True)
+            return
+
+        await callback.answer("✅ Вы успешно вступили в пати!")
+        await db.unlock_achievement(callback.message.chat.id, user.id, "party_hero")
+
+    elif action == "leave":
+        res, party_data = await db.leave_party(party_id, user.id)
+        if res == "not_in":
+            await callback.answer("⚠️ Вас нет в составе этого пати.", show_alert=True)
+            return
+        elif res == "not_found":
+            await callback.answer("❌ Пати не найдено.", show_alert=True)
+            return
+
+        await callback.answer("ℹ️ Вы вышли из пати.")
+
+    elif action == "cancel":
+        party_data = await db.get_party(party_id)
+        if not party_data:
+            await callback.answer("Пати не найдено.")
+            return
+
+        is_creator = (user.id == party_data["creator_id"])
+        is_admin = await check_admin(bot, callback.message)
+
+        if not is_creator and not is_admin:
+            await callback.answer("⛔ Только организатор или админ может отменить сбор!", show_alert=True)
+            return
+
+        _, party_data = await db.cancel_party(party_id, user.id)
+        await callback.answer("❌ Сбор отменен.")
+
+    if party_data:
+        text, kb = format_party_message(party_data)
+        try:
+            await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        except Exception:
+            pass
+
 # Набор имён команд, зарегистрированных в роутере — строится один раз при старте.
 # Так dynamic_role_call никогда не обрабатывает «свои» команды.
 KNOWN_COMMANDS: set[str] = set()
@@ -687,7 +838,6 @@ def _collect_known_commands() -> None:
     """Собирает все команды, зарегистрированные в router, в KNOWN_COMMANDS."""
     for handler in router.message.handlers:
         for flt in getattr(handler, 'filters', []):
-            # aiogram хранит фильтр как экземпляр Command / CommandStart
             obj = flt.callback if hasattr(flt, 'callback') else flt
             if isinstance(obj, (Command, CommandStart)):
                 cmds = getattr(obj, 'commands', [])
@@ -695,8 +845,7 @@ def _collect_known_commands() -> None:
                     name = cmd.command if hasattr(cmd, 'command') else str(cmd)
                     KNOWN_COMMANDS.add(name.lower())
 
-    # Запасной хардкод — сработает, если рефлексия ничего не нашла
-    fallback = {"start", "help", "menu", "create", "delete", "join", "leave", "list", "add", "all", "everyone", "notify", "send"}
+    fallback = {"start", "help", "menu", "create", "delete", "join", "leave", "list", "add", "all", "everyone", "notify", "send", "party"}
     KNOWN_COMMANDS.update(fallback)
 
 
@@ -713,7 +862,6 @@ async def dynamic_role_call(message: Message):
     raw_cmd = message.text[1:].split()[0]
     command_text = raw_cmd.split('@')[0].lower()
 
-    # Если команда совпадает с уже зарегистрированным хендлером — не трогаем
     if command_text in KNOWN_COMMANDS:
         return
 
@@ -723,12 +871,13 @@ async def dynamic_role_call(message: Message):
 
     if members:
         mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
-        mentions_str = "\n".join(f"👤 {m}" for m in mentions_list)
+        mentions_str = "\n".join(f"👤 {m}" for m in mentions_str) if False else "\n".join(f"👤 {m}" for m in mentions_list)
 
         text = (
             f"📢 <b>Призыв участников {emoji} {html.escape(command_text)}!</b> ({len(members)} чел.)\n\n"
             f"<blockquote expandable>{mentions_str}</blockquote>"
         )
         await message.reply(text, parse_mode=ParseMode.HTML)
+
 
 

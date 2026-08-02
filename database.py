@@ -64,6 +64,42 @@ async def init_db():
             )
         ''')
 
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS user_achievements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                achievement_id TEXT NOT NULL,
+                unlocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(chat_id, user_id, achievement_id)
+            )
+        ''')
+
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS parties (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                message_id INTEGER,
+                creator_id INTEGER NOT NULL,
+                creator_name TEXT NOT NULL,
+                title TEXT NOT NULL,
+                max_slots INTEGER NOT NULL DEFAULT 5,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS party_members (
+                party_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                username TEXT NOT NULL,
+                joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(party_id) REFERENCES parties(id) ON DELETE CASCADE,
+                PRIMARY KEY(party_id, user_id)
+            )
+        ''')
+
         # Очищаем возможные прошлые дубликаты в базе при старте
         try:
             await conn.execute('''
@@ -336,3 +372,194 @@ async def get_all_chat_ids() -> list[int]:
         ''')
         rows = await cursor.fetchall()
         return [r[0] for r in rows]
+
+# ==========================================
+# ОПРЕДЕЛЕНИЕ АЧИВОК (В СТИЛЕ XBOX / STEAM)
+# ==========================================
+ACHIEVEMENTS_DEF = {
+    "first_join": {
+        "title": "ПЕРВАЯ КРОВЬ",
+        "badge": "🎯",
+        "score": "10G",
+        "desc": "Присоединиться к первой роли в чате"
+    },
+    "multiclass": {
+        "title": "МАСТЕР ВСЕХ КЛАССОВ",
+        "badge": "⚔️",
+        "score": "25G",
+        "desc": "Состоять одновременно в 3+ разных ролях"
+    },
+    "party_starter": {
+        "title": "КАПИТАН СТАКА",
+        "badge": "🎮",
+        "score": "30G",
+        "desc": "Собрать первое успешное пати"
+    },
+    "party_hero": {
+        "title": "БОЕВОЙ ТОВАРИЩ",
+        "badge": "🤝",
+        "score": "20G",
+        "desc": "Присоединиться к пати другого участника"
+    },
+    "sheriff": {
+        "title": "ШЕРИФ ГИЛЬДИИ",
+        "badge": "👑",
+        "score": "50G",
+        "desc": "Создать новую роль в чате"
+    },
+    "night_shift": {
+        "title": "НОЧНАЯ СМЕНА",
+        "badge": "🌙",
+        "score": "15G",
+        "desc": "Вступить в роль в ночное время (00:00 - 06:00)"
+    }
+}
+
+async def unlock_achievement(chat_id: int, user_id: int, achievement_id: str) -> bool:
+    """Выдает ачивку пользователю, если её еще нет."""
+    if achievement_id not in ACHIEVEMENTS_DEF:
+        return False
+    try:
+        async with get_db() as conn:
+            await conn.execute(
+                'INSERT INTO user_achievements (chat_id, user_id, achievement_id) VALUES (?, ?, ?)',
+                (chat_id, user_id, achievement_id)
+            )
+            await conn.commit()
+            return True
+    except aiosqlite.IntegrityError:
+        return False
+
+async def get_user_achievements(chat_id: int, user_id: int) -> list[dict]:
+    """Возвращает список всех ачивок пользователя."""
+    async with get_db() as conn:
+        cursor = await conn.execute(
+            'SELECT achievement_id, unlocked_at FROM user_achievements WHERE chat_id = ? AND user_id = ?',
+            (chat_id, user_id)
+        )
+        rows = await cursor.fetchall()
+        unlocked_map = {r[0]: r[1] for r in rows}
+
+    result = []
+    for ach_id, meta in ACHIEVEMENTS_DEF.items():
+        is_unlocked = ach_id in unlocked_map
+        result.append({
+            "id": ach_id,
+            "title": meta["title"],
+            "badge": meta["badge"],
+            "score": meta["score"],
+            "desc": meta["desc"],
+            "unlocked": is_unlocked,
+            "unlocked_at": unlocked_map.get(ach_id)
+        })
+    return result
+
+# ==========================================
+# УПРАВЛЕНИЕ СБОРОМ ПАТИ (LFG)
+# ==========================================
+async def create_party(chat_id: int, creator_id: int, creator_name: str, title: str, max_slots: int = 5) -> int:
+    """Создает новую запись пати и возвращает party_id."""
+    async with get_db() as conn:
+        cursor = await conn.execute(
+            'INSERT INTO parties (chat_id, creator_id, creator_name, title, max_slots) VALUES (?, ?, ?, ?, ?)',
+            (chat_id, creator_id, creator_name, title, max_slots)
+        )
+        party_id = cursor.lastrowid
+        await conn.execute(
+            'INSERT INTO party_members (party_id, user_id, username) VALUES (?, ?, ?)',
+            (party_id, creator_id, creator_name)
+        )
+        await conn.commit()
+        return party_id
+
+async def set_party_message_id(party_id: int, message_id: int):
+    """Привязывает message_id сообщения Telegram к пати."""
+    async with get_db() as conn:
+        await conn.execute('UPDATE parties SET message_id = ? WHERE id = ?', (message_id, party_id))
+        await conn.commit()
+
+async def get_party(party_id: int) -> dict | None:
+    """Возвращает подробную информацию о пати и его участниках."""
+    async with get_db() as conn:
+        c1 = await conn.execute('SELECT id, chat_id, message_id, creator_id, creator_name, title, max_slots, status, created_at FROM parties WHERE id = ?', (party_id,))
+        p = await c1.fetchone()
+        if not p:
+            return None
+        
+        c2 = await conn.execute('SELECT user_id, username FROM party_members WHERE party_id = ? ORDER BY joined_at ASC', (party_id,))
+        members = await c2.fetchall()
+        
+        return {
+            "id": p[0],
+            "chat_id": p[1],
+            "message_id": p[2],
+            "creator_id": p[3],
+            "creator_name": p[4],
+            "title": p[5],
+            "max_slots": p[6],
+            "status": p[7],
+            "created_at": p[8],
+            "members": [{"user_id": m[0], "username": m[1]} for m in members]
+        }
+
+async def join_party(party_id: int, user_id: int, username: str) -> tuple[str, dict | None]:
+    """Присоединяет пользователя к пати."""
+    async with get_db() as conn:
+        c1 = await conn.execute('SELECT id, chat_id, message_id, creator_id, creator_name, title, max_slots, status FROM parties WHERE id = ?', (party_id,))
+        p = await c1.fetchone()
+        if not p:
+            return "not_found", None
+        if p[7] != "active":
+            return "closed", None
+        
+        max_slots = p[6]
+        c2 = await conn.execute('SELECT COUNT(*) FROM party_members WHERE party_id = ?', (party_id,))
+        current_count = (await c2.fetchone())[0]
+
+        if current_count >= max_slots:
+            return "full", None
+
+        try:
+            await conn.execute(
+                'INSERT INTO party_members (party_id, user_id, username) VALUES (?, ?, ?)',
+                (party_id, user_id, username)
+            )
+            await conn.commit()
+        except aiosqlite.IntegrityError:
+            return "already_in", None
+
+        c3 = await conn.execute('SELECT COUNT(*) FROM party_members WHERE party_id = ?', (party_id,))
+        new_count = (await c3.fetchone())[0]
+        if new_count >= max_slots:
+            await conn.execute('UPDATE parties SET status = "completed" WHERE id = ?', (party_id,))
+            await conn.commit()
+
+    party_data = await get_party(party_id)
+    return "success", party_data
+
+async def leave_party(party_id: int, user_id: int) -> tuple[str, dict | None]:
+    """Удаляет пользователя из пати."""
+    async with get_db() as conn:
+        c1 = await conn.execute('SELECT id, status FROM parties WHERE id = ?', (party_id,))
+        p = await c1.fetchone()
+        if not p:
+            return "not_found", None
+        
+        cursor = await conn.execute('DELETE FROM party_members WHERE party_id = ? AND user_id = ?', (party_id, user_id))
+        await conn.commit()
+        if cursor.rowcount == 0:
+            return "not_in", None
+        
+        await conn.execute('UPDATE parties SET status = "active" WHERE id = ?', (party_id,))
+        await conn.commit()
+
+    party_data = await get_party(party_id)
+    return "success", party_data
+
+async def cancel_party(party_id: int, user_id: int) -> tuple[str, dict | None]:
+    """Отменяет сбор пати."""
+    async with get_db() as conn:
+        await conn.execute('UPDATE parties SET status = "cancelled" WHERE id = ?', (party_id,))
+        await conn.commit()
+    party_data = await get_party(party_id)
+    return "success", party_data

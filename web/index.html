@@ -641,7 +641,71 @@
             border-bottom: 1px solid var(--card-border);
         }
 
-        .list-row-item:last-child { border-bottom: none; }
+        /* Ачивки (Xbox style) */
+        .ach-card {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-inner);
+            padding: 14px;
+            margin-bottom: 10px;
+            opacity: 0.45;
+            filter: grayscale(100%);
+            transition: opacity 0.2s ease, filter 0.2s ease, border-color 0.2s ease;
+        }
+
+        .ach-card.unlocked {
+            opacity: 1;
+            filter: grayscale(0%);
+            background: rgba(52, 199, 89, 0.08);
+            border-color: rgba(52, 199, 89, 0.3);
+        }
+
+        .ach-icon-box {
+            width: 44px;
+            height: 44px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.08);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            flex-shrink: 0;
+        }
+
+        .ach-info {
+            flex: 1;
+        }
+
+        .ach-title-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2px;
+        }
+
+        .ach-title {
+            font-size: 14px;
+            font-weight: 800;
+            letter-spacing: -0.2px;
+        }
+
+        .ach-score {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--accent-gold);
+            background: rgba(245, 158, 11, 0.15);
+            padding: 2px 8px;
+            border-radius: 6px;
+        }
+
+        .ach-desc {
+            font-size: 12px;
+            color: var(--text-dim);
+        }
 
         /* Модалка */
         .modal-overlay {
@@ -758,6 +822,7 @@
             <button class="nav-item-btn active" onclick="switchTab('roles', this)">🛡️ Роли</button>
             <button class="nav-item-btn" onclick="switchTab('create', this)">➕ Создать</button>
             <button class="nav-item-btn" onclick="switchTab('stats', this)">📊 Состав</button>
+            <button class="nav-item-btn" onclick="switchTab('achievements', this)">🏆 Ачивки</button>
             <button class="nav-item-btn" onclick="switchTab('logs', this)">📜 История</button>
             <button class="nav-item-btn admin-tab" id="admin-tab-btn" onclick="switchTab('admin', this)">⚡ Админка</button>
         </div>
@@ -837,6 +902,22 @@
                 <div class="card-title">История изменений чата</div>
                 <div id="logs-list">
                     <div class="loader-text">Загрузка истории...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ТАБ: Ачивки (Xbox Style) -->
+        <div id="tab-achievements" class="tab-content">
+            <div class="glass-card">
+                <div class="card-file-header">
+                    <span class="file-icon">🏆</span> achievements.xbox
+                </div>
+                <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+                    <span>Достижения профиля</span>
+                    <span id="gamerscore-badge" style="font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:800; color:var(--accent-gold); background:rgba(245,158,11,0.15); padding:4px 10px; border-radius:8px; border:1px solid rgba(245,158,11,0.3);">0G</span>
+                </div>
+                <div id="achievements-list">
+                    <div class="loader-text">Загрузка достижений...</div>
                 </div>
             </div>
         </div>
@@ -1036,8 +1117,41 @@
                 fetchChatMembers();
             } else if (tabName === 'logs') {
                 fetchAuditLogs();
+            } else if (tabName === 'achievements') {
+                fetchAchievements();
             } else if (tabName === 'admin') {
                 fetchAdminStats();
+            }
+        }
+
+        async function fetchAchievements() {
+            if (!chatId || !currentUser.id) return;
+            try {
+                const res = await fetch(`/api/achievements?chat_id=${chatId}&user_id=${currentUser.id}`);
+                const data = await res.json();
+                const achs = data.achievements || [];
+                
+                let totalG = 0;
+                achs.forEach(a => {
+                    if (a.unlocked) totalG += parseInt(a.score);
+                });
+                document.getElementById('gamerscore-badge').textContent = `${totalG}G`;
+
+                const container = document.getElementById('achievements-list');
+                container.innerHTML = achs.map(a => `
+                    <div class="ach-card ${a.unlocked ? 'unlocked' : ''}">
+                        <div class="ach-icon-box">${a.badge}</div>
+                        <div class="ach-info">
+                            <div class="ach-title-row">
+                                <div class="ach-title">${escapeHtml(a.title)}</div>
+                                <div class="ach-score">${escapeHtml(a.score)}</div>
+                            </div>
+                            <div class="ach-desc">${escapeHtml(a.desc)}</div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                console.error("Ошибка загрузки ачивок:", e);
             }
         }
 

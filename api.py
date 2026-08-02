@@ -239,6 +239,17 @@ async def handle_admin_stats(request: web.Request):
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
 
+async def handle_get_achievements(request: web.Request):
+    chat_id = request.query.get("chat_id")
+    user_id = request.query.get("user_id")
+    if not chat_id or not user_id:
+        return web.json_response({"error": "chat_id and user_id are required"}, status=400)
+    try:
+        achs = await db.get_user_achievements(int(chat_id), int(user_id))
+        return web.json_response({"achievements": achs})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
 async def handle_index(request: web.Request):
     return web.FileResponse(os.path.join(os.path.dirname(__file__), "web", "index.html"))
 
@@ -248,6 +259,7 @@ def create_web_app() -> web.Application:
     app.router.add_get("/api/roles", handle_get_roles)
     app.router.add_get("/api/chat_members", handle_get_chat_members)
     app.router.add_get("/api/audit_logs", handle_get_audit_logs)
+    app.router.add_get("/api/achievements", handle_get_achievements)
     app.router.add_post("/api/join", handle_join_role)
     app.router.add_post("/api/leave", handle_leave_role)
     app.router.add_post("/api/create", handle_create_role)
