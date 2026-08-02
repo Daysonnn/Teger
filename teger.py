@@ -49,17 +49,6 @@ async def setup_commands(bot: Bot):
     ]
     await bot.set_my_commands(commands)
 
-
-
-    webapp_url = os.getenv("WEBAPP_URL")
-    if webapp_url:
-        try:
-            await bot.set_chat_menu_button(
-                menu_button=MenuButtonWebApp(text="📱 Mini App", web_app=WebAppInfo(url=webapp_url))
-            )
-        except Exception as e:
-            logging.warning(f"Не удалось установить кнопку меню: {e}")
-
 async def start_web_server():
     app = create_web_app()
     runner = web.AppRunner(app)

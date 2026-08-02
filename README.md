@@ -73,7 +73,7 @@ pip install -r requirements.txt
 Создайте в корне проекта файл `.env`:
 ```env
 TOKEN=8146945075:AAHh3vmKX3GaV5nMC5QKjI_8u-qE2imCY24
-WEBAPP_URL=https://your-domain.com
+WEBAPP_URL=https://app.dayson.lol
 PORT=8000
 # PROXY=http://127.0.0.1:10808  # Укажите прокси, если требуется
 ```
