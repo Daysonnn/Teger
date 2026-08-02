@@ -372,8 +372,12 @@ html, body {
 /* ---- Emoji row ---- */
 .emoji-row {
   display: flex; gap: 8px;
-  overflow-x: auto; padding-bottom: 14px;
-  scrollbar-width: none; margin-bottom: 16px;
+  overflow-x: auto;
+  /* padding компенсирует scale(1.1) активной кнопки чтобы не обрезалась */
+  padding: 6px 6px 14px 6px;
+  margin-bottom: 10px;
+  margin-left: -6px; margin-right: -6px;
+  scrollbar-width: none;
 }
 .emoji-row::-webkit-scrollbar { display: none; }
 
@@ -382,15 +386,18 @@ html, body {
   border-radius: var(--radius-sm);
   border: 1.5px solid var(--border); background: var(--surface-hover);
   font-size: 22px; cursor: pointer;
-  transition: transform 0.13s var(--ease), border-color 0.15s, background 0.15s;
+  transition: transform 0.15s var(--ease), border-color 0.18s, background 0.18s, box-shadow 0.18s;
   will-change: transform;
+  /* overflow должен быть visible чтобы shadow не обрезалась */
+  overflow: visible;
 }
 
 .emoji-btn:active { transform: scale(0.9); }
 
 .emoji-btn.active {
   border-color: var(--blue); background: var(--blue-dim);
-  transform: scale(1.08);
+  transform: scale(1.12);
+  box-shadow: 0 0 0 3px var(--blue-glow);
 }
 
 /* ---- Fields ---- */
