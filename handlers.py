@@ -202,7 +202,8 @@ async def start_cmd(message: Message, command: CommandObject):
     rich_blocks = [
         {
             "type": "heading",
-            "text": "🛡️ Управление Ролями"
+            "text": "🛡️ Управление Ролями",
+            "size": 2
         },
         {
             "type": "paragraph",
@@ -234,7 +235,8 @@ async def help_cmd(message: Message):
     rich_blocks = [
         {
             "type": "heading",
-            "text": "🛡️ Управление Ролями"
+            "text": "🛡️ Управление Ролями",
+            "size": 2
         },
         {
             "type": "paragraph",
