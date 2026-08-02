@@ -251,6 +251,16 @@
         <button class="btn-primary compact-btn" onclick="addManualUser()">+</button>
       </div>
 
+      <!-- Алиасы роли (только для админов) -->
+      <div id="modal-aliases-container" style="display: none; padding: 0 16px 16px 16px;">
+        <div class="header-title" style="font-size: 14px; margin-bottom: 8px;">Алиасы (альтернативные названия):</div>
+        <div id="modal-aliases-list" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;"></div>
+        <div class="modal-actions-row" style="padding: 0;">
+          <input type="text" id="manual-alias-input" class="field-input" placeholder="Новый алиас (напр. 'майн')">
+          <button class="btn-primary compact-btn" onclick="addAlias()">+</button>
+        </div>
+      </div>
+
       <div class="search-wrap" style="padding:0;margin-bottom:12px">
         <div class="search-inner">
           <svg class="search-ico" viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="6" stroke="currentColor" stroke-width="1.8"/><path d="m15 15 3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>

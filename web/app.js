@@ -494,6 +494,74 @@ async function openMemberModal(roleName) {
   document.getElementById('modal-backdrop').classList.add('open');
   await fetchChatMembers();
   renderModalMembers(chatMembersCache);
+  
+  // Алиасы
+  if (isOwnerUser && chatId) {
+    document.getElementById('modal-aliases-container').style.display = 'block';
+    await loadAliases(roleName);
+  } else {
+    document.getElementById('modal-aliases-container').style.display = 'none';
+  }
+}
+
+async function loadAliases(roleName) {
+  try {
+    const res = await fetch(`/api/aliases?chat_id=${chatId}&role_name=${encodeURIComponent(roleName)}`);
+    const data = await res.json();
+    renderAliases(data.aliases || []);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function renderAliases(aliases) {
+  const container = document.getElementById('modal-aliases-list');
+  container.innerHTML = '';
+  aliases.forEach(a => {
+    const badge = document.createElement('span');
+    badge.className = 'mbadge me'; // используем стиль бейджа
+    badge.style.cursor = 'pointer';
+    badge.textContent = a + ' ✖';
+    badge.onclick = () => deleteAlias(a);
+    container.appendChild(badge);
+  });
+  if (aliases.length === 0) {
+    container.innerHTML = '<span style="color:var(--text-secondary);font-size:12px;">Нет алиасов</span>';
+  }
+}
+
+async function addAlias() {
+  const inp = document.getElementById('manual-alias-input');
+  const aliasName = inp.value.trim();
+  if (!aliasName || !activeModalRole) return;
+  
+  try {
+    const data = await apiPost('/api/aliases', {
+      chat_id: parseInt(chatId), role_name: activeModalRole, alias_name: aliasName
+    });
+    if (data.status === 'success') {
+      toast('Алиас добавлен');
+      inp.value = '';
+      await loadAliases(activeModalRole);
+    } else {
+      toast('Ошибка или алиас существует');
+    }
+  } catch { toast('Ошибка'); }
+}
+
+async function deleteAlias(aliasName) {
+  if (!confirm(`Удалить алиас "${aliasName}"?`)) return;
+  try {
+    const data = await apiPost('/api/delete_alias', {
+      chat_id: parseInt(chatId), alias_name: aliasName
+    });
+    if (data.status === 'success') {
+      toast('Алиас удален');
+      await loadAliases(activeModalRole);
+    } else {
+      toast('Ошибка удаления');
+    }
+  } catch { toast('Ошибка'); }
 }
 
 function closeMemberModal(event) {

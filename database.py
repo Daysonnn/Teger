@@ -100,6 +100,16 @@ async def init_db():
             )
         ''')
 
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS role_aliases (
+                chat_id INTEGER NOT NULL,
+                alias_name TEXT NOT NULL COLLATE NOCASE,
+                role_id INTEGER NOT NULL,
+                FOREIGN KEY(role_id) REFERENCES roles(id) ON DELETE CASCADE,
+                UNIQUE(chat_id, alias_name)
+            )
+        ''')
+
         # Индексы для оптимизации
         await conn.execute('CREATE INDEX IF NOT EXISTS idx_members_role_user ON members(role_id, user_id)')
         await conn.execute('CREATE INDEX IF NOT EXISTS idx_members_lower_username ON members(LOWER(username))')
@@ -220,6 +230,58 @@ async def get_all_chat_users(chat_id: int) -> list[tuple[int, str]]:
         rows = await cursor.fetchall()
         return rows
 
+# ==========================================
+# ALIASES MANAGEMENT
+# ==========================================
+async def resolve_role_name(chat_id: int, name: str) -> str:
+    """Проверяет, является ли name алиасом, и возвращает реальное имя роли. Иначе возвращает сам name."""
+    async with get_db() as conn:
+        cursor = await conn.execute('''
+            SELECT r.name FROM role_aliases a
+            JOIN roles r ON a.role_id = r.id
+            WHERE a.chat_id = ? AND LOWER(a.alias_name) = LOWER(?)
+        ''', (chat_id, name))
+        row = await cursor.fetchone()
+        if row:
+            return row[0]
+        return name
+
+async def add_role_alias(chat_id: int, role_name: str, alias_name: str) -> str:
+    """Добавляет алиас к роли. Возвращает success, not_found, или exists."""
+    real_name = await resolve_role_name(chat_id, role_name)
+    async with get_db() as conn:
+        cursor = await conn.execute('SELECT id FROM roles WHERE chat_id = ? AND LOWER(name) = LOWER(?)', (chat_id, real_name))
+        row = await cursor.fetchone()
+        if not row:
+            return "not_found"
+        role_id = row[0]
+        try:
+            await conn.execute('INSERT INTO role_aliases (chat_id, alias_name, role_id) VALUES (?, ?, ?)', (chat_id, alias_name, role_id))
+            await conn.commit()
+            return "success"
+        except aiosqlite.IntegrityError:
+            return "exists"
+
+async def remove_role_alias(chat_id: int, alias_name: str) -> bool:
+    """Удаляет алиас по его имени."""
+    async with get_db() as conn:
+        cursor = await conn.execute('DELETE FROM role_aliases WHERE chat_id = ? AND LOWER(alias_name) = LOWER(?)', (chat_id, alias_name))
+        await conn.commit()
+        return cursor.rowcount > 0
+
+async def get_role_aliases(chat_id: int, role_name: str) -> list[str]:
+    """Возвращает список алиасов для конкретной роли."""
+    real_name = await resolve_role_name(chat_id, role_name)
+    async with get_db() as conn:
+        cursor = await conn.execute('''
+            SELECT a.alias_name FROM role_aliases a
+            JOIN roles r ON a.role_id = r.id
+            WHERE a.chat_id = ? AND LOWER(r.name) = LOWER(?)
+        ''', (chat_id, real_name))
+        rows = await cursor.fetchall()
+        return [r[0] for r in rows]
+
+
 async def create_role(chat_id: int, role_name: str, emoji: str = "🛡️") -> bool:
     try:
         async with get_db() as conn:
@@ -339,9 +401,10 @@ async def get_inline_role_members(role_name: str) -> list[tuple[int, str]]:
                            ) as rn
                     FROM members m
                     JOIN roles r ON m.role_id = r.id
-                    WHERE r.name = ?
+                    LEFT JOIN role_aliases a ON r.id = a.role_id
+                    WHERE LOWER(r.name) = LOWER(?) OR LOWER(a.alias_name) = LOWER(?)
                 ) WHERE rn = 1
-            ''', (role_name,))
+            ''', (role_name, role_name))
         rows = await cursor.fetchall()
         return rows
 

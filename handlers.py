@@ -621,6 +621,49 @@ async def inline_query_handler(query: InlineQuery):
         ]
         await query.answer(fallback, cache_time=0, is_personal=True)
 
+@router.message(Command("alias"))
+async def alias_role(message: Message, command: CommandObject, bot: Bot):
+    if not await is_group(message): return
+    if not await check_admin(bot, message):
+        await message.reply("👑 Только для администраторов!")
+        return
+
+    if not command.args or len(command.args.split()) < 2:
+        await message.reply("💡 Использование: <code>/alias &lt;роль&gt; &lt;алиас&gt;</code>\nНапример: <code>/alias minecraft майн</code>", parse_mode=ParseMode.HTML)
+        return
+
+    parts = command.args.split(maxsplit=1)
+    role_name = parts[0]
+    alias_name = parts[1]
+    chat_id = message.chat.id
+
+    res = await db.add_role_alias(chat_id, role_name, alias_name)
+    if res == "success":
+        await message.reply(f"✅ Алиас <b>{html.escape(alias_name)}</b> успешно привязан к роли <b>{html.escape(role_name)}</b>.", parse_mode=ParseMode.HTML)
+    elif res == "exists":
+        await message.reply(f"⚠️ Алиас <b>{html.escape(alias_name)}</b> уже существует в этом чате.", parse_mode=ParseMode.HTML)
+    elif res == "not_found":
+        await message.reply(f"❌ Роли <b>{html.escape(role_name)}</b> не найдено.", parse_mode=ParseMode.HTML)
+
+@router.message(Command("unalias"))
+async def unalias_role(message: Message, command: CommandObject, bot: Bot):
+    if not await is_group(message): return
+    if not await check_admin(bot, message):
+        await message.reply("👑 Только для администраторов!")
+        return
+
+    if not command.args:
+        await message.reply("💡 Использование: <code>/unalias &lt;алиас&gt;</code>", parse_mode=ParseMode.HTML)
+        return
+
+    alias_name = command.args.split()[0]
+    chat_id = message.chat.id
+
+    if await db.remove_role_alias(chat_id, alias_name):
+        await message.reply(f"🗑 Алиас <b>{html.escape(alias_name)}</b> успешно удален.", parse_mode=ParseMode.HTML)
+    else:
+        await message.reply(f"❓ Алиас <b>{html.escape(alias_name)}</b> не найден.", parse_mode=ParseMode.HTML)
+
 @router.message(Command("create"))
 async def create_role(message: Message, command: CommandObject, bot: Bot):
     if not await is_group(message): return
@@ -658,8 +701,9 @@ async def delete_role(message: Message, command: CommandObject, bot: Bot):
         await message.reply("💡 Использование: <code>/delete &lt;название&gt;</code>", parse_mode=ParseMode.HTML)
         return
 
-    role_name = command.args.split()[0]
+    raw_name = command.args.split()[0]
     chat_id = message.chat.id
+    role_name = await db.resolve_role_name(chat_id, raw_name)
 
     if await db.delete_role(chat_id, role_name):
         await message.reply(f"🗑 Роль <b>{html.escape(role_name)}</b> удалена.", parse_mode=ParseMode.HTML)
@@ -674,8 +718,9 @@ async def join_role(message: Message, command: CommandObject):
         await message.reply("💡 Использование: <code>/join &lt;название&gt;</code>", parse_mode=ParseMode.HTML)
         return
 
-    role_name = command.args.split()[0]
+    raw_name = command.args.split()[0]
     chat_id = message.chat.id
+    role_name = await db.resolve_role_name(chat_id, raw_name)
     user = message.from_user
     username = f"@{user.username}" if user.username else user.first_name
 
@@ -713,8 +758,9 @@ async def leave_role(message: Message, command: CommandObject):
         await message.reply("💡 Использование: <code>/leave &lt;название&gt;</code>", parse_mode=ParseMode.HTML)
         return
 
-    role_name = command.args.split()[0]
+    raw_name = command.args.split()[0]
     chat_id = message.chat.id
+    role_name = await db.resolve_role_name(chat_id, raw_name)
 
     if await db.leave_role(chat_id, role_name, message.from_user.id):
         await message.reply(f"👋 Вы покинули роль <b>{html.escape(role_name)}</b>.", parse_mode=ParseMode.HTML)
@@ -779,9 +825,10 @@ async def notify_role(message: Message, command: CommandObject, bot: Bot):
         return
 
     parts = command.args.split(maxsplit=1)
-    role_name = parts[0]
+    raw_name = parts[0]
     notice_text = parts[1]
     chat_id = message.chat.id
+    role_name = await db.resolve_role_name(chat_id, raw_name)
 
     emoji = await db.get_role_emoji(chat_id, role_name)
     members = await db.get_role_members(chat_id, role_name)
@@ -820,8 +867,9 @@ async def add_to_role(message: Message, command: CommandObject, bot: Bot):
         return
 
     args_list = command.args.split()
-    role_name = args_list[0]
+    raw_name = args_list[0]
     chat_id = message.chat.id
+    role_name = await db.resolve_role_name(chat_id, raw_name)
     sender_un = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
 
     raw_usernames = args_list[1:]

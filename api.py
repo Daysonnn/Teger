@@ -113,6 +113,36 @@ async def handle_delete_role(request: web.Request):
         await db.add_audit_log(int(chat_id), None, None, "Удалена роль", f"Роль: {role_name}")
     return web.json_response({"status": "success" if success else "not_found"})
 
+async def handle_aliases(request: web.Request):
+    if request.method == "GET":
+        chat_id = request.query.get("chat_id")
+        role_name = request.query.get("role_name")
+        if not chat_id or not role_name:
+            return web.json_response({"error": "Missing fields"}, status=400)
+        aliases = await db.get_role_aliases(int(chat_id), role_name)
+        return web.json_response({"aliases": aliases})
+    
+    elif request.method == "POST":
+        data = await request.json()
+        chat_id = data.get("chat_id")
+        role_name = data.get("role_name")
+        alias_name = data.get("alias_name")
+        if not chat_id or not role_name or not alias_name:
+            return web.json_response({"error": "Missing fields"}, status=400)
+        
+        status = await db.add_role_alias(int(chat_id), role_name, alias_name)
+        return web.json_response({"status": status})
+
+async def handle_delete_alias(request: web.Request):
+    data = await request.json()
+    chat_id = data.get("chat_id")
+    alias_name = data.get("alias_name")
+    if not chat_id or not alias_name:
+        return web.json_response({"error": "Missing fields"}, status=400)
+    
+    success = await db.remove_role_alias(int(chat_id), alias_name)
+    return web.json_response({"status": "success" if success else "not_found"})
+
 async def handle_get_chat_members(request: web.Request):
     chat_id = request.query.get("chat_id")
     if not chat_id:
@@ -282,6 +312,9 @@ def create_web_app() -> web.Application:
     app.router.add_post("/api/leave", handle_leave_role)
     app.router.add_post("/api/create", handle_create_role)
     app.router.add_post("/api/delete", handle_delete_role)
+    app.router.add_get("/api/aliases", handle_aliases)
+    app.router.add_post("/api/aliases", handle_aliases)
+    app.router.add_post("/api/delete_alias", handle_delete_alias)
     
     # Admin routes
     app.router.add_get("/api/admin/check", handle_admin_check)
