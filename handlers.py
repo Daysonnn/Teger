@@ -756,6 +756,7 @@ def format_party_message(party: dict) -> tuple[str, InlineKeyboardMarkup | None]
             InlineKeyboardButton(text="Выйти", callback_data=f"pty:leave:{party['id']}")
         ],
         [
+            InlineKeyboardButton(text="⚙️ Настройки", callback_data=f"pty:settings:{party['id']}"),
             InlineKeyboardButton(text="Отменить сбор", callback_data=f"pty:cancel:{party['id']}")
         ]
     ])
@@ -775,7 +776,7 @@ async def create_party_cmd(message: Message, command: CommandObject):
         else:
             title_parts.append(arg)
 
-    title = " ".join(title_parts) if title_parts else "Игровая сессия"
+    title = " ".join(title_parts) if title_parts else "Группа"
     user = message.from_user
     creator_name = f"@{user.username}" if user.username else user.first_name
 
@@ -804,7 +805,14 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
     user = callback.from_user
     username = f"@{user.username}" if user.username else user.first_name
 
-    party_data = None
+    party_data = await db.get_party(party_id)
+    if not party_data:
+        await callback.answer("❌ Сбор отменен или устарел.", show_alert=True)
+        return
+
+    is_creator = (user.id == party_data["creator_id"])
+    is_admin = await check_admin(bot, callback.message)
+
     if action == "join":
         res, party_data = await db.join_party(party_id, user.id, username)
         if res == "already_in":
@@ -820,6 +828,19 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
         await callback.answer("✅ Вы успешно вступили в пати!")
         await db.unlock_achievement(callback.message.chat.id, user.id, "party_hero")
 
+        # Когда группа заполнилась — отправляем отдельным ответным сообщением громкий призыв всех участников
+        if party_data and party_data.get("status") == "completed":
+            mentions_all = " ".join([format_user_mention(m["user_id"], m["username"]) for m in party_data["members"]])
+            completion_text = (
+                f"🔥 <b>Группа «{html.escape(party_data['title'])}» успешно собрана! ({party_data['max_slots']}/{party_data['max_slots']})</b>\n\n"
+                f"📢 <b>Призыв участников:</b> {mentions_all}\n"
+                f"<i>Все в сборе! Заходите в игру / голосовой канал!</i>"
+            )
+            try:
+                await callback.message.reply(completion_text, parse_mode=ParseMode.HTML)
+            except Exception as ex:
+                logging.warning(f"Failed to send completion reply: {ex}")
+
     elif action == "leave":
         res, party_data = await db.leave_party(party_id, user.id)
         if res == "not_in":
@@ -832,20 +853,110 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
         await callback.answer("ℹ️ Вы вышли из пати.")
 
     elif action == "cancel":
-        party_data = await db.get_party(party_id)
-        if not party_data:
-            await callback.answer("Пати не найдено.")
-            return
-
-        is_creator = (user.id == party_data["creator_id"])
-        is_admin = await check_admin(bot, callback.message)
-
         if not is_creator and not is_admin:
             await callback.answer("⛔ Только организатор или админ может отменить сбор!", show_alert=True)
             return
 
         _, party_data = await db.cancel_party(party_id, user.id)
         await callback.answer("❌ Сбор отменен.")
+
+    elif action == "settings":
+        if not is_creator and not is_admin:
+            await callback.answer("⛔ Настройки доступны только организатору!", show_alert=True)
+            return
+
+        text = (
+            f"<b>⚙️ Настройки сбора: {html.escape(party_data['title'])}</b>\n"
+            f"Текущее число мест: <b>{party_data['max_slots']}</b> (Занято: {len(party_data['members'])})"
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="➕ Место", callback_data=f"pty:inc_slots:{party_id}"),
+                InlineKeyboardButton(text="➖ Место", callback_data=f"pty:dec_slots:{party_id}")
+            ],
+            [
+                InlineKeyboardButton(text="👤 Исключить участника", callback_data=f"pty:kick_menu:{party_id}")
+            ],
+            [
+                InlineKeyboardButton(text="◀️ Назад к сбору", callback_data=f"pty:refresh:{party_id}")
+            ]
+        ])
+        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        return
+
+    elif action == "inc_slots":
+        if not is_creator and not is_admin: return
+        updated = await db.update_party_slots(party_id, party_data["max_slots"] + 1)
+        if updated:
+            party_data = updated
+            await callback.answer("➕ Добавлено место!")
+        else:
+            await callback.answer("⚠️ Максимум 10 мест.", show_alert=True)
+            return
+        # Возвращаем меню настроек
+        text = f"<b>⚙️ Настройки сбора: {html.escape(party_data['title'])}</b>\nТекущее число мест: <b>{party_data['max_slots']}</b> (Занято: {len(party_data['members'])})"
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="➕ Место", callback_data=f"pty:inc_slots:{party_id}"),
+                InlineKeyboardButton(text="➖ Место", callback_data=f"pty:dec_slots:{party_id}")
+            ],
+            [
+                InlineKeyboardButton(text="👤 Исключить участника", callback_data=f"pty:kick_menu:{party_id}")
+            ],
+            [
+                InlineKeyboardButton(text="◀️ Назад к сбору", callback_data=f"pty:refresh:{party_id}")
+            ]
+        ])
+        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        return
+
+    elif action == "dec_slots":
+        if not is_creator and not is_admin: return
+        updated = await db.update_party_slots(party_id, party_data["max_slots"] - 1)
+        if updated:
+            party_data = updated
+            await callback.answer("➖ Уменьшено место!")
+        else:
+            await callback.answer("⚠️ Нельзя сделать меньше задействованных мест или меньше 2.", show_alert=True)
+            return
+        text = f"<b>⚙️ Настройки сбора: {html.escape(party_data['title'])}</b>\nТекущее число мест: <b>{party_data['max_slots']}</b> (Занято: {len(party_data['members'])})"
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="➕ Место", callback_data=f"pty:inc_slots:{party_id}"),
+                InlineKeyboardButton(text="➖ Место", callback_data=f"pty:dec_slots:{party_id}")
+            ],
+            [
+                InlineKeyboardButton(text="👤 Исключить участника", callback_data=f"pty:kick_menu:{party_id}")
+            ],
+            [
+                InlineKeyboardButton(text="◀️ Назад к сбору", callback_data=f"pty:refresh:{party_id}")
+            ]
+        ])
+        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        return
+
+    elif action == "kick_menu":
+        if not is_creator and not is_admin: return
+        other_members = [m for m in party_data["members"] if m["user_id"] != party_data["creator_id"]]
+        if not other_members:
+            await callback.answer("⚠️ В группе пока нет других участников.", show_alert=True)
+            return
+
+        buttons = [
+            [InlineKeyboardButton(text=f"❌ Кикнуть {m['username']}", callback_data=f"pty:kick:{party_id}:{m['user_id']}")]
+            for m in other_members
+        ]
+        buttons.append([InlineKeyboardButton(text="◀️ Назад в настройки", callback_data=f"pty:settings:{party_id}")])
+
+        text = f"<b>Выберите участника для исключения:</b>"
+        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+        return
+
+    elif action == "kick":
+        if not is_creator and not is_admin: return
+        target_uid = int(parts[3])
+        _, party_data = await db.leave_party(party_id, target_uid)
+        await callback.answer("❌ Участник исключен из пати.")
 
     if party_data:
         text, kb = format_party_message(party_data)

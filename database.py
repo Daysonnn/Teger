@@ -549,3 +549,25 @@ async def cancel_party(party_id: int, user_id: int) -> tuple[str, dict | None]:
         await conn.commit()
     party_data = await get_party(party_id)
     return "success", party_data
+
+async def update_party_slots(party_id: int, new_max_slots: int) -> dict | None:
+    """Изменяет количество мест в пати (от 2 до 10)."""
+    async with get_db() as conn:
+        c1 = await conn.execute('SELECT COUNT(*) FROM party_members WHERE party_id = ?', (party_id,))
+        count_row = await c1.fetchone()
+        count = count_row[0] if count_row else 0
+        if new_max_slots < count or new_max_slots < 2 or new_max_slots > 10:
+            return None
+        await conn.execute('UPDATE parties SET max_slots = ? WHERE id = ?', (new_max_slots, party_id))
+        await conn.commit()
+    return await get_party(party_id)
+
+async def cleanup_old_parties():
+    """Автоматически очищает старые (>12ч) или завершенные/отмененные пати из базы данных."""
+    async with get_db() as conn:
+        await conn.execute('''
+            DELETE FROM parties 
+            WHERE status IN ('completed', 'cancelled') 
+               OR datetime(created_at, '+12 hours') < datetime('now')
+        ''')
+        await conn.commit()

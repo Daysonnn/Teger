@@ -59,6 +59,15 @@ async def start_web_server():
     print(f"🌐 Веб-сервер Mini App запущен на сервере (порт {PORT})")
     return runner
 
+async def periodic_cleanup_task():
+    """Фоновый таск: каждые 10 минут очищает завершенные/старые пати из БД."""
+    while True:
+        try:
+            await db.cleanup_old_parties()
+        except Exception as e:
+            logging.error(f"Error in periodic_cleanup_task: {e}")
+        await asyncio.sleep(600)
+
 async def main():
     if not TOKEN:
         logging.error("Ошибка: TOKEN не найден в .env файле!")
@@ -85,6 +94,8 @@ async def main():
 
     await setup_commands(bot)
     
+    asyncio.create_task(periodic_cleanup_task())
+
     try:
         print("🤖 Бот запущен и ожидает сообщений...")
         await dp.start_polling(bot)
