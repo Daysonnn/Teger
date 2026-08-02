@@ -274,5 +274,8 @@ def create_web_app() -> web.Application:
     assets_dir = os.path.join(os.path.dirname(__file__), "assets")
     app.router.add_static("/static/", web_dir, name="static")
     app.router.add_static("/assets/", assets_dir, name="assets")
-    
+    # Serve style.css and app.js directly from web/
+    app.router.add_get("/style.css", lambda r: web.FileResponse(os.path.join(web_dir, "style.css")))
+    app.router.add_get("/app.js", lambda r: web.FileResponse(os.path.join(web_dir, "app.js")))
+
     return app

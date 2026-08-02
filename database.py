@@ -100,6 +100,15 @@ async def init_db():
             )
         ''')
 
+        # Индексы для оптимизации
+        await conn.execute('CREATE INDEX IF NOT EXISTS idx_members_role_user ON members(role_id, user_id)')
+        await conn.execute('CREATE INDEX IF NOT EXISTS idx_members_lower_username ON members(LOWER(username))')
+        await conn.execute('CREATE INDEX IF NOT EXISTS idx_parties_status ON parties(status)')
+        await conn.execute('CREATE INDEX IF NOT EXISTS idx_parties_chat_id ON parties(chat_id)')
+        await conn.execute('CREATE INDEX IF NOT EXISTS idx_party_members_party_id ON party_members(party_id)')
+        await conn.execute('CREATE INDEX IF NOT EXISTS idx_roles_chat_id ON roles(chat_id)')
+        await conn.execute('CREATE INDEX IF NOT EXISTS idx_chat_users_chat_id ON chat_users(chat_id)')
+
         # Очищаем возможные прошлые дубликаты в базе при старте
         try:
             await conn.execute('''
