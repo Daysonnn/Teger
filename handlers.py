@@ -2,7 +2,7 @@ import os
 import html
 import time
 import logging
-from aiogram import Router, F, Bot
+from aiogram import Router, F, Bot, BaseMiddleware
 from aiogram.enums import ChatType, ParseMode
 from aiogram.filters import CommandObject, Command, CommandStart
 from aiogram.methods.base import TelegramMethod
@@ -18,6 +18,16 @@ import database as db
 _admin_cache: TTLCache = TTLCache(maxsize=512, ttl=60)
 
 router = Router()
+
+class UserRecorderMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event: Message, data: dict):
+        if hasattr(event, "chat") and event.chat and event.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP) and event.from_user:
+            user = event.from_user
+            uname = f"@{user.username}" if user.username else user.first_name
+            await db.record_chat_user(event.chat.id, user.id, uname)
+        return await handler(event, data)
+
+router.message.middleware(UserRecorderMiddleware())
 
 # Эмодзи для ачивок
 ACH_ICONS = {
@@ -276,10 +286,11 @@ async def start_cmd(message: Message, command: CommandObject):
             return
 
     roles = await db.get_all_roles(chat_id)
-    total_members = 0
-    for r in roles:
-        members = await db.get_role_members(chat_id, r)
-        total_members += len(members)
+    try:
+        total_members = await message.bot.get_chat_member_count(chat_id)
+    except Exception:
+        # Fallback if bot is missing privileges, though usually works
+        total_members = len(await db.get_all_chat_users(chat_id))
 
     html_text = await build_menu_text(chat_id)
     keyboard = get_main_menu_keyboard(chat_id, is_private=is_priv)
