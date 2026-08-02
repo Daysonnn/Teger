@@ -328,7 +328,10 @@ async def cb_menu(query: CallbackQuery):
     text = await build_menu_text(chat_id)
     keyboard = get_main_menu_keyboard(chat_id)
     roles = await db.get_all_roles(chat_id)
-    total_members = sum(len(await db.get_role_members(chat_id, r)) for r in roles)
+    total_members = 0
+    for r in roles:
+        members = await db.get_role_members(chat_id, r)
+        total_members += len(members)
     rich_blocks = [
         {"type": "heading", "text": "🛡️ Управление Ролями", "size": 2},
         {"type": "paragraph", "text": f"📊 Статистика группы:\n• Активных ролей: {len(roles)}\n• Участников: {total_members}"},
