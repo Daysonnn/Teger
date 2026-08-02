@@ -45,7 +45,7 @@ async def send_smart_message(
                 reply_markup=reply_markup
             ))
         except Exception as e:
-            logging.debug(f"RichMessage unsupported/failed, falling back to HTML: {e}")
+            logging.error(f"RichMessage error: {e}")
 
     return await bot.send_message(
         chat_id=chat_id,
