@@ -191,7 +191,11 @@ async def start_cmd(message: Message, command: CommandObject):
             return
 
     roles = await db.get_all_roles(chat_id)
-    total_members = sum(len(await db.get_role_members(chat_id, r)) for r in roles)
+    total_members = 0
+    for r in roles:
+        members = await db.get_role_members(chat_id, r)
+        total_members += len(members)
+
     html_text = await build_menu_text(chat_id)
     keyboard = get_main_menu_keyboard(chat_id, is_private=is_priv)
 
@@ -219,7 +223,11 @@ async def help_cmd(message: Message):
     chat_id = message.chat.id
     is_priv = (message.chat.type == ChatType.PRIVATE)
     roles = await db.get_all_roles(chat_id)
-    total_members = sum(len(await db.get_role_members(chat_id, r)) for r in roles)
+    total_members = 0
+    for r in roles:
+        members = await db.get_role_members(chat_id, r)
+        total_members += len(members)
+
     html_text = await build_menu_text(chat_id)
     keyboard = get_main_menu_keyboard(chat_id, is_private=is_priv)
 
