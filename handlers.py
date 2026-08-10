@@ -1344,13 +1344,14 @@ async def process_respect_give(message: Message, target_user: User):
     if status == "self":
         await message.reply("😄 Сам себе респект не выпишешь!")
     elif status == "cooldown":
-        mins = max(1, value // 60)
-        await message.reply(f"⏳ Вы уже давали респект {html.escape(target_un)} недавно. Подождите ещё ~{mins} мин.", parse_mode=ParseMode.HTML)
+        secs = max(1, value)
+        await message.reply(f"⏳ Вы уже давали респект {html.escape(target_un)} недавно. Подождите ещё ~{secs} сек.", parse_mode=ParseMode.HTML)
     elif status == "success":
         from_un = f"@{from_user.username}" if from_user.username else from_user.first_name
+        badge_str = f"{badge} " if badge else ""
         text = (
             f"🤝 <b>{html.escape(from_un)}</b> выразил(а) респект <b>{html.escape(target_un)}</b>! (+1)\n"
-            f"📊 Всего очков: <b>{value}</b> | Ранг: {badge} <b>{title}</b>"
+            f"📊 Всего очков: <b>{value}</b> | Ранг: {badge_str}<b>{title}</b>"
         )
         await message.reply(text, parse_mode=ParseMode.HTML)
         await db.unlock_achievement(chat_id, target_user.id, "first_respect")
@@ -1381,7 +1382,8 @@ async def respect_top_cmd(message: Message, command: CommandObject):
     lines = ["🏆 <b>Топ лидеров респекта группы:</b>\n"]
     for u in top_users:
         rank_icon = "🥇" if u["rank"] == 1 else "🥈" if u["rank"] == 2 else "🥉" if u["rank"] == 3 else f"{u['rank']}."
-        lines.append(f"{rank_icon} <b>{html.escape(u['username'])}</b> — <b>{u['points']}</b> {u['badge']} ({u['title']})")
+        badge_str = f"{u['badge']} " if u['badge'] else ""
+        lines.append(f"{rank_icon} <b>{html.escape(u['username'])}</b> — <b>{u['points']}</b> {badge_str}({u['title']})")
 
     lines.append("\n💡 <i>Отвечайте «спс», «спасибо» или «+1» на сообщения, чтобы давать респект!</i>")
     await message.reply("\n".join(lines), parse_mode=ParseMode.HTML)

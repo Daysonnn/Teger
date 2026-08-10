@@ -704,9 +704,9 @@ async def cleanup_old_parties():
 def get_respect_rank_title(points: int) -> tuple[str, str]:
     """Возвращает тупл (значок, название ранга) в зависимости от количества очков респекта."""
     if points >= 50:
-        return ("⚡", "Гигачад")
+        return ("", "Гигачад")
     elif points >= 30:
-        return ("👑", "Легенда чата")
+        return ("", "Легенда")
     elif points >= 15:
         return ("🥇", "Авторитет")
     elif points >= 5:
@@ -714,7 +714,7 @@ def get_respect_rank_title(points: int) -> tuple[str, str]:
     elif points >= 1:
         return ("🥉", "Новичок")
     else:
-        return ("🌱", "Прохожий")
+        return ("", "Прохожий")
 
 async def give_respect(chat_id: int, from_user_id: int, to_user_id: int, to_username: str) -> tuple[str, int, tuple[str, str]]:
     """
@@ -723,10 +723,10 @@ async def give_respect(chat_id: int, from_user_id: int, to_user_id: int, to_user
     status: 'success', 'self', 'cooldown'
     """
     if from_user_id == to_user_id:
-        return ("self", 0, ("❌", "Сам себе"))
+        return ("self", 0, ("", "Сам себе"))
 
     async with get_db() as conn:
-        # Проверяем кулдаун (300 сек = 5 минут между высылкой респекта одному и тому же юзеру)
+        # Проверяем кулдаун (60 сек = 1 минута между высылкой респекта от A к B)
         cursor = await conn.execute('''
             SELECT CAST((julianday('now') - julianday(last_given_at)) * 86400 AS INTEGER)
             FROM respect_cooldowns
@@ -734,8 +734,8 @@ async def give_respect(chat_id: int, from_user_id: int, to_user_id: int, to_user
         ''', (chat_id, from_user_id, to_user_id))
         row = await cursor.fetchone()
         
-        if row and row[0] is not None and row[0] < 300:
-            remaining = 300 - row[0]
+        if row and row[0] is not None and row[0] < 60:
+            remaining = 60 - row[0]
             return ("cooldown", remaining, ("⏳", "Кулдаун"))
 
         # Обновляем кулдаун
