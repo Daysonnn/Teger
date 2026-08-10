@@ -1343,6 +1343,39 @@ RESPECT_KEYWORDS = {
     "+1", "+", "+100", "+100500", "+1000"
 }
 
+async def build_respect_top_rich_blocks(chat_id: int) -> tuple[list, str]:
+    """Генерирует структуры Rich Message блоков и HTML тексты для топа респекта."""
+    top_users = await db.get_top_respect(chat_id, limit=10)
+    if not top_users:
+        text = (
+            "🏆 <b>Топ респекта группы</b>\n\n"
+            "<i>Пока никто не получил респект. Отвечайте «спасибо» или «+» на сообщения участников!</i>"
+        )
+        blocks = [
+            {"type": "heading", "text": "🏆 Топ Респекта Группы", "size": 2},
+            {"type": "paragraph", "text": "Пока никто не получил респект.\nОтвечайте «спасибо» или «+» на сообщения!"}
+        ]
+        return blocks, text
+
+    list_items = []
+    text_lines = ["🏆 <b>Топ лидеров респекта группы:</b>\n"]
+    for u in top_users:
+        rank_num = u["rank"]
+        title_str = f" ({u['title']})" if u['title'] else ""
+        uname_clean = u['username'].lstrip('@')
+        list_items.append({
+            "blocks": [{"type": "paragraph", "text": f"{rank_num}. {uname_clean} — {u['points']} 🤝{title_str}"}]
+        })
+        text_lines.append(f"{rank_num}. <b>{html.escape(u['username'])}</b> — <b>{u['points']}</b> 🤝{html.escape(title_str)}")
+
+    text_lines.append("\n💡 <i>Отвечайте «спс», «спасибо», «+реп» или «+» на сообщения, чтобы давать респект!</i>")
+
+    blocks = [
+        {"type": "heading", "text": "🏆 Топ Лидеров Респекта", "size": 2},
+        {"type": "list", "items": list_items}
+    ]
+    return blocks, "\n".join(text_lines)
+
 async def process_respect_give(message: Message, target_user: User):
     from_user = message.from_user
     chat_id = message.chat.id
@@ -1360,11 +1393,20 @@ async def process_respect_give(message: Message, target_user: User):
         from_un = f"@{from_user.username}" if from_user.username else from_user.first_name
         badge_str = f"{badge} " if badge else ""
         text = (
-            f"🤝 <b>{html.escape(from_un)}</b> выразил(а) респект <b>{html.escape(target_un)}</b>! (+1)\n"
+            f"🤝 <b>{html.escape(from_un)}</b> выразил(а) респект <b>{html.escape(target_un)}</b>! (+)\n"
             f"📊 Всего очков: <b>{value}</b> | Ранг: {badge_str}<b>{title}</b>"
         )
         await message.reply(text, parse_mode=ParseMode.HTML)
         await db.unlock_achievement(chat_id, target_user.id, "first_respect")
+
+        # Автообновление сообщения /top в реальном времени при получении респекта
+        top_msg_id = await db.get_active_top_message(chat_id)
+        if top_msg_id:
+            try:
+                blocks, html_text = await build_respect_top_rich_blocks(chat_id)
+                await edit_smart_message(message.bot, chat_id, top_msg_id, html_text, rich_blocks=blocks)
+            except Exception as e:
+                logging.warning(f"Failed to auto-update top message: {e}")
 
 
 @router.message(Command("top", "rep", "respect"))
@@ -1379,24 +1421,11 @@ async def respect_top_cmd(message: Message, command: CommandObject):
         return
 
     chat_id = message.chat.id
-    top_users = await db.get_top_respect(chat_id, limit=10)
+    blocks, html_text = await build_respect_top_rich_blocks(chat_id)
     
-    if not top_users:
-        await message.reply(
-            "🏆 <b>Топ респекта группы</b>\n\n"
-            "<i>Пока никто не получил респект. Отвечайте «спасибо» или «+1» на сообщения участников!</i>",
-            parse_mode=ParseMode.HTML
-        )
-        return
-
-    lines = ["🏆 <b>Топ лидеров респекта группы:</b>\n"]
-    for u in top_users:
-        rank_icon = f"{u['rank']}."
-        badge_str = f"{u['badge']} " if u['badge'] else ""
-        lines.append(f"{rank_icon} <b>{html.escape(u['username'])}</b> — <b>{u['points']}</b> {badge_str}({u['title']})")
-
-    lines.append("\n💡 <i>Отвечайте «спс», «спасибо», «+реп» или «+1» на сообщения, чтобы давать респект!</i>")
-    await message.reply("\n".join(lines), parse_mode=ParseMode.HTML)
+    sent_msg = await send_smart_message(message.bot, chat_id, html_text, rich_blocks=blocks)
+    if sent_msg and hasattr(sent_msg, 'message_id'):
+        await db.save_active_top_message(chat_id, sent_msg.message_id)
 
 
 @router.message(F.text & F.reply_to_message)

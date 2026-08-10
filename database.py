@@ -130,6 +130,14 @@ async def init_db():
             )
         ''')
 
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS active_top_messages (
+                chat_id INTEGER PRIMARY KEY,
+                message_id INTEGER NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
         # Индексы для оптимизации
         await conn.execute('CREATE INDEX IF NOT EXISTS idx_members_role_user ON members(role_id, user_id)')
         await conn.execute('CREATE INDEX IF NOT EXISTS idx_members_lower_username ON members(LOWER(username))')
@@ -844,3 +852,20 @@ async def set_user_respect(chat_id: int, user_id: int, points: int) -> int:
         ''', (chat_id, user_id, new_pts, new_pts))
         await conn.commit()
     return new_pts
+
+async def save_active_top_message(chat_id: int, message_id: int):
+    """Сохраняет ID сообщения топа респекта в чате для реального автообновления."""
+    async with get_db() as conn:
+        await conn.execute('''
+            INSERT INTO active_top_messages (chat_id, message_id, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(chat_id) DO UPDATE SET message_id = excluded.message_id, updated_at = CURRENT_TIMESTAMP
+        ''', (chat_id, message_id))
+        await conn.commit()
+
+async def get_active_top_message(chat_id: int) -> int | None:
+    """Возвращает message_id сообщения топа респекта в чате."""
+    async with get_db() as conn:
+        cursor = await conn.execute('SELECT message_id FROM active_top_messages WHERE chat_id = ?', (chat_id,))
+        row = await cursor.fetchone()
+        return row[0] if row else None
