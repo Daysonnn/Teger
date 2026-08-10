@@ -309,6 +309,25 @@ async def handle_get_respect_top(request: web.Request):
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
 
+async def handle_admin_set_respect(request: web.Request):
+    data = await request.json()
+    user_id = data.get("user_id")
+    if not check_is_owner(user_id):
+        return web.json_response({"error": "Доступ запрещен"}, status=403)
+        
+    chat_id = data.get("chat_id")
+    target_user_id = data.get("target_user_id")
+    points = data.get("points")
+    
+    if not chat_id or not target_user_id or points is None:
+        return web.json_response({"error": "Не все поля указаны"}, status=400)
+        
+    try:
+        new_pts = await db.set_user_respect(int(chat_id), int(target_user_id), int(points))
+        return web.json_response({"status": "success", "new_points": new_pts})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
 async def handle_index(request: web.Request):
     return web.FileResponse(os.path.join(os.path.dirname(__file__), "web", "index.html"))
 
@@ -332,6 +351,7 @@ def create_web_app() -> web.Application:
     app.router.add_get("/api/admin/check", handle_admin_check)
     app.router.add_post("/api/admin/send", handle_admin_send)
     app.router.add_get("/api/admin/stats", handle_admin_stats)
+    app.router.add_post("/api/admin/respect/set", handle_admin_set_respect)
     
     web_dir = os.path.join(os.path.dirname(__file__), "web")
     assets_dir = os.path.join(os.path.dirname(__file__), "assets")

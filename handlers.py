@@ -1354,8 +1354,8 @@ async def process_respect_give(message: Message, target_user: User):
     if status == "self":
         await message.reply("😄 Сам себе респект не выпишешь!")
     elif status == "cooldown":
-        secs = max(1, value)
-        await message.reply(f"⏳ Вы уже давали респект {html.escape(target_un)} недавно. Подождите ещё ~{secs} сек.", parse_mode=ParseMode.HTML)
+        mins = max(1, (value + 59) // 60)
+        await message.reply(f"⏳ Вы уже давали респект {html.escape(target_un)} недавно. Подождите ещё ~{mins} мин.", parse_mode=ParseMode.HTML)
     elif status == "success":
         from_un = f"@{from_user.username}" if from_user.username else from_user.first_name
         badge_str = f"{badge} " if badge else ""
@@ -1409,6 +1409,11 @@ async def respect_text_trigger(message: Message):
         return
 
     clean_text = message.text.strip().lower()
+    
+    # Игнорируем минус-респект и любые сообщения, пытающиеся отнять респект
+    if clean_text.startswith("-") or "минус" in clean_text or "-rep" in clean_text or "-реп" in clean_text:
+        return
+
     words = {w.strip("!.,?:;()+-") for w in clean_text.replace("\n", " ").split()}
     raw_words = set(clean_text.replace("\n", " ").split())
     

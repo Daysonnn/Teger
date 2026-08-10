@@ -680,6 +680,34 @@ async function fetchRespectTop() {
   }
 }
 
+async function saveAdminRespect() {
+  const targetChat = document.getElementById('admin-respect-chat-id').value.trim() || chatId;
+  const targetUser = document.getElementById('admin-respect-user-id').value.trim();
+  const ptsVal = document.getElementById('admin-respect-pts').value.trim();
+  
+  if (!targetChat) { toast('Укажите Target Chat ID'); return; }
+  if (!targetUser) { toast('Укажите User ID пользователя'); return; }
+  if (ptsVal === '') { toast('Укажите количество очков'); return; }
+
+  try {
+    const data = await apiPost('/api/admin/respect/set', {
+      user_id: currentUser.id,
+      chat_id: targetChat,
+      target_user_id: targetUser,
+      points: parseInt(ptsVal)
+    });
+    if (data.status === 'success') {
+      haptic('medium');
+      toast(`✅ Респект установлен: ${data.new_points} 🤝`);
+      fetchRespectTop();
+    } else {
+      toast(data.error || 'Ошибка');
+    }
+  } catch (e) {
+    toast('Ошибка соединения');
+  }
+}
+
 // ---- Boot ----
 checkOwnerStatus();
 fetchRoles();

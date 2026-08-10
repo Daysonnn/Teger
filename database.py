@@ -726,7 +726,7 @@ async def give_respect(chat_id: int, from_user_id: int, to_user_id: int, to_user
         return ("self", 0, ("", "Сам себе"))
 
     async with get_db() as conn:
-        # Проверяем кулдаун (60 сек = 1 минута между высылкой респекта от A к B)
+        # Проверяем кулдаун (300 сек = 5 минут между высылкой респекта от A к B)
         cursor = await conn.execute('''
             SELECT CAST((julianday('now') - julianday(last_given_at)) * 86400 AS INTEGER)
             FROM respect_cooldowns
@@ -734,8 +734,8 @@ async def give_respect(chat_id: int, from_user_id: int, to_user_id: int, to_user
         ''', (chat_id, from_user_id, to_user_id))
         row = await cursor.fetchone()
         
-        if row and row[0] is not None and row[0] < 60:
-            remaining = 60 - row[0]
+        if row and row[0] is not None and row[0] < 300:
+            remaining = 300 - row[0]
             return ("cooldown", remaining, ("⏳", "Кулдаун"))
 
         # Обновляем кулдаун
@@ -832,3 +832,15 @@ async def get_user_respect(chat_id: int, user_id: int) -> dict:
             "title": title,
             "rank": rank_pos
         }
+
+async def set_user_respect(chat_id: int, user_id: int, points: int) -> int:
+    """Устанавливает или скручивает количество очков респекта конкретному пользователю."""
+    new_pts = max(0, points)
+    async with get_db() as conn:
+        await conn.execute('''
+            INSERT INTO user_respect (chat_id, user_id, points)
+            VALUES (?, ?, ?)
+            ON CONFLICT(chat_id, user_id) DO UPDATE SET points = ?
+        ''', (chat_id, user_id, new_pts, new_pts))
+        await conn.commit()
+    return new_pts

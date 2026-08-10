@@ -197,6 +197,28 @@
 
       <div class="card">
         <div class="card-title-row">
+          <span class="card-title">Управление респектом</span>
+          <span class="card-mono">respect.edit</span>
+        </div>
+        <div class="field-wrap">
+          <label class="field-label">Target Chat ID</label>
+          <input type="text" id="admin-respect-chat-id" class="field-input" placeholder="-1001234567890">
+        </div>
+        <div class="field-wrap">
+          <label class="field-label">User ID участника</label>
+          <input type="text" id="admin-respect-user-id" class="field-input" placeholder="123456789">
+        </div>
+        <div class="field-wrap">
+          <label class="field-label">Новое количество очков респекта</label>
+          <input type="number" id="admin-respect-pts" class="field-input" placeholder="0, 5, 50..." min="0">
+        </div>
+        <button class="btn-primary full-width" onclick="saveAdminRespect()">
+          🤝 Изменить респект пользователя
+        </button>
+      </div>
+
+      <div class="card">
+        <div class="card-title-row">
           <span class="card-title">Статистика бота</span>
           <span class="card-mono">system.json</span>
         </div>
