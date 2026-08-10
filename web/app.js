@@ -647,14 +647,11 @@ document.querySelectorAll('.emoji-row').forEach(el => {
 
 // ---- Respect Top ----
 async function fetchRespectTop() {
-  if (!chatId) {
-    document.getElementById('respect-list').innerHTML = '<div class="empty-state">Укажите chat_id</div>';
-    return;
-  }
   const el = document.getElementById('respect-list');
   el.innerHTML = '<div class="loader-state">Загрузка...</div>';
   try {
-    const res = await fetch(`/api/respect_top?chat_id=${chatId}`);
+    const url = chatId ? `/api/respect_top?chat_id=${chatId}` : `/api/respect_top`;
+    const res = await fetch(url);
     const data = await res.json();
     const list = data.top || [];
     if (!list.length) {
@@ -667,10 +664,11 @@ async function fetchRespectTop() {
       const row = document.createElement('div');
       row.className = 'list-item-row';
       const rankIcon = u.rank === 1 ? '🥇' : u.rank === 2 ? '🥈' : u.rank === 3 ? '🥉' : `${u.rank}.`;
+      const badgeStr = u.badge ? `${u.badge} ` : '';
       row.innerHTML = `
         <div class="item-main">
           <div class="item-title">${rankIcon} ${esc(u.username)}</div>
-          <div class="item-sub">${u.badge} ${esc(u.title)}</div>
+          <div class="item-sub">${badgeStr}${esc(u.title)}</div>
         </div>
         <div class="badge-chip purple">${u.points} 🤝</div>
       `;

@@ -300,11 +300,12 @@ async def handle_get_achievements(request: web.Request):
 
 async def handle_get_respect_top(request: web.Request):
     chat_id = request.query.get("chat_id")
-    if not chat_id:
-        return web.json_response({"error": "chat_id is required"}, status=400)
     try:
-        top_users = await db.get_top_respect(int(chat_id), limit=10)
-        return web.json_response({"top": top_users})
+        if chat_id:
+            top_users = await db.get_top_respect(int(chat_id), limit=10)
+        else:
+            top_users = await db.get_global_top_respect(limit=10)
+        return web.json_response({"top": top_users, "is_global": not bool(chat_id)})
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
 

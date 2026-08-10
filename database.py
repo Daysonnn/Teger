@@ -787,6 +787,32 @@ async def get_top_respect(chat_id: int, limit: int = 10) -> list[dict]:
             })
         return result
 
+async def get_global_top_respect(limit: int = 10) -> list[dict]:
+    """Возвращает глобальный топ лидеров респекта по всем чатам."""
+    async with get_db() as conn:
+        cursor = await conn.execute('''
+            SELECT user_id, username, SUM(points) as total_pts
+            FROM user_respect
+            WHERE points > 0
+            GROUP BY user_id
+            ORDER BY total_pts DESC
+            LIMIT ?
+        ''', (limit,))
+        rows = await cursor.fetchall()
+        
+        result = []
+        for rank, (uid, uname, pts) in enumerate(rows, start=1):
+            badge, title = get_respect_rank_title(pts)
+            result.append({
+                "rank": rank,
+                "user_id": uid,
+                "username": uname or f"id{uid}",
+                "points": pts,
+                "badge": badge,
+                "title": title
+            })
+        return result
+
 async def get_user_respect(chat_id: int, user_id: int) -> dict:
     """Возвращает респект конкретного пользователя и его ранг."""
     async with get_db() as conn:

@@ -1394,13 +1394,14 @@ async def respect_text_trigger(message: Message):
     if message.chat.type == ChatType.PRIVATE or not message.from_user or not message.reply_to_message.from_user:
         return
 
+    target_user = message.reply_to_message.from_user
+    if target_user.is_bot:
+        return
+
     clean_text = message.text.strip().lower()
-    first_word = clean_text.split()[0].rstrip("!.,?:;") if clean_text else ""
+    words = {w.strip("!.,?:;()") for w in clean_text.replace("\n", " ").split()}
     
-    if clean_text in RESPECT_KEYWORDS or first_word in RESPECT_KEYWORDS or clean_text.startswith("+1"):
-        target_user = message.reply_to_message.from_user
-        if target_user.is_bot:
-            return
+    if (words & RESPECT_KEYWORDS) or "от души" in clean_text or clean_text.startswith("+1") or "+1" in words:
         await process_respect_give(message, target_user)
 
 
