@@ -298,6 +298,16 @@ async def handle_get_achievements(request: web.Request):
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
 
+async def handle_get_respect_top(request: web.Request):
+    chat_id = request.query.get("chat_id")
+    if not chat_id:
+        return web.json_response({"error": "chat_id is required"}, status=400)
+    try:
+        top_users = await db.get_top_respect(int(chat_id), limit=10)
+        return web.json_response({"top": top_users})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
 async def handle_index(request: web.Request):
     return web.FileResponse(os.path.join(os.path.dirname(__file__), "web", "index.html"))
 
@@ -308,6 +318,7 @@ def create_web_app() -> web.Application:
     app.router.add_get("/api/chat_members", handle_get_chat_members)
     app.router.add_get("/api/audit_logs", handle_get_audit_logs)
     app.router.add_get("/api/achievements", handle_get_achievements)
+    app.router.add_get("/api/respect_top", handle_get_respect_top)
     app.router.add_post("/api/join", handle_join_role)
     app.router.add_post("/api/leave", handle_leave_role)
     app.router.add_post("/api/create", handle_create_role)

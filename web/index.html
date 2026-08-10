@@ -118,13 +118,29 @@
       </div>
     </div>
 
-    <!-- ТАБ: Ачивки -->
+    <!-- ТАБ: Достижения -->
     <div id="tab-achievements" class="tab-page">
       <div class="page-header">
         <div class="header-title">Достижения</div>
       </div>
       <div id="achievements-list" class="achievements-feed">
         <div class="loader-state">Загрузка...</div>
+      </div>
+    </div>
+
+    <!-- ТАБ: Респект -->
+    <div id="tab-respect" class="tab-page">
+      <div class="page-header">
+        <div class="header-title">🏆 Топ Респекта</div>
+      </div>
+      <div class="card">
+        <div class="card-title-row">
+          <span class="card-title">Лидеры группы</span>
+          <span class="card-mono">respect.top</span>
+        </div>
+        <div id="respect-list" class="list-feed">
+          <div class="loader-state">Загрузка...</div>
+        </div>
       </div>
     </div>
 
@@ -224,6 +240,10 @@
     <button class="nav-btn" onclick="switchTab('achievements',this)" data-tab="achievements">
       <svg class="nav-icon" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="5" stroke="currentColor" stroke-width="1.8"/><path d="M8 13.5l-2 7 6-3 6 3-2-7" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
       <span>Ачивки</span>
+    </button>
+    <button class="nav-btn" onclick="switchTab('respect',this)" data-tab="respect">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Респект</span>
     </button>
     <button class="nav-btn" onclick="switchTab('logs',this)" data-tab="logs">
       <svg class="nav-icon" viewBox="0 0 24 24" fill="none"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>

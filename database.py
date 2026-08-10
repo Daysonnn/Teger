@@ -110,6 +110,26 @@ async def init_db():
             )
         ''')
 
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS user_respect (
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                username TEXT,
+                points INTEGER DEFAULT 0,
+                PRIMARY KEY(chat_id, user_id)
+            )
+        ''')
+
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS respect_cooldowns (
+                chat_id INTEGER NOT NULL,
+                from_user_id INTEGER NOT NULL,
+                to_user_id INTEGER NOT NULL,
+                last_given_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(chat_id, from_user_id, to_user_id)
+            )
+        ''')
+
         # Индексы для оптимизации
         await conn.execute('CREATE INDEX IF NOT EXISTS idx_members_role_user ON members(role_id, user_id)')
         await conn.execute('CREATE INDEX IF NOT EXISTS idx_members_lower_username ON members(LOWER(username))')
@@ -472,6 +492,10 @@ ACHIEVEMENTS_DEF = {
     "night_shift": {
         "title": "Ночная активность",
         "desc": "Вход в роль в период с 00:00 до 06:00"
+    },
+    "first_respect": {
+        "title": "Уважаемый человек",
+        "desc": "Получен первый респект от участника чата"
     }
 }
 
@@ -676,3 +700,109 @@ async def cleanup_old_parties():
                OR datetime(created_at, '+12 hours') < datetime('now')
         ''')
         await conn.commit()
+
+def get_respect_rank_title(points: int) -> tuple[str, str]:
+    """Возвращает тупл (значок, название ранга) в зависимости от количества очков респекта."""
+    if points >= 50:
+        return ("⚡", "Гигачад")
+    elif points >= 30:
+        return ("👑", "Легенда чата")
+    elif points >= 15:
+        return ("🥇", "Авторитет")
+    elif points >= 5:
+        return ("🥈", "Уважаемый")
+    elif points >= 1:
+        return ("🥉", "Новичок")
+    else:
+        return ("🌱", "Прохожий")
+
+async def give_respect(chat_id: int, from_user_id: int, to_user_id: int, to_username: str) -> tuple[str, int, tuple[str, str]]:
+    """
+    Выдает 1 очко респекта пользователю to_user_id от from_user_id.
+    Возвращает (status, new_points/remaining_secs, (badge, title))
+    status: 'success', 'self', 'cooldown'
+    """
+    if from_user_id == to_user_id:
+        return ("self", 0, ("❌", "Сам себе"))
+
+    async with get_db() as conn:
+        # Проверяем кулдаун (300 сек = 5 минут между высылкой респекта одному и тому же юзеру)
+        cursor = await conn.execute('''
+            SELECT CAST((julianday('now') - julianday(last_given_at)) * 86400 AS INTEGER)
+            FROM respect_cooldowns
+            WHERE chat_id = ? AND from_user_id = ? AND to_user_id = ?
+        ''', (chat_id, from_user_id, to_user_id))
+        row = await cursor.fetchone()
+        
+        if row and row[0] is not None and row[0] < 300:
+            remaining = 300 - row[0]
+            return ("cooldown", remaining, ("⏳", "Кулдаун"))
+
+        # Обновляем кулдаун
+        await conn.execute('''
+            INSERT INTO respect_cooldowns (chat_id, from_user_id, to_user_id, last_given_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(chat_id, from_user_id, to_user_id) DO UPDATE SET last_given_at = CURRENT_TIMESTAMP
+        ''', (chat_id, from_user_id, to_user_id))
+
+        # Выдаем респект
+        clean_username = to_username if to_username and to_username.startswith("@") else f"@{to_username}" if to_username else f"id{to_user_id}"
+        await conn.execute('''
+            INSERT INTO user_respect (chat_id, user_id, username, points)
+            VALUES (?, ?, ?, 1)
+            ON CONFLICT(chat_id, user_id) DO UPDATE SET points = points + 1, username = excluded.username
+        ''', (chat_id, to_user_id, clean_username))
+
+        # Получаем итоговые очки
+        c2 = await conn.execute('SELECT points FROM user_respect WHERE chat_id = ? AND user_id = ?', (chat_id, to_user_id))
+        r2 = await c2.fetchone()
+        new_points = r2[0] if r2 else 1
+        
+        await conn.commit()
+
+    return ("success", new_points, get_respect_rank_title(new_points))
+
+async def get_top_respect(chat_id: int, limit: int = 10) -> list[dict]:
+    """Возвращает топ лидеров респекта в чате."""
+    async with get_db() as conn:
+        cursor = await conn.execute('''
+            SELECT user_id, username, points
+            FROM user_respect
+            WHERE chat_id = ? AND points > 0
+            ORDER BY points DESC, user_id ASC
+            LIMIT ?
+        ''', (chat_id, limit))
+        rows = await cursor.fetchall()
+        
+        result = []
+        for rank, (uid, uname, pts) in enumerate(rows, start=1):
+            badge, title = get_respect_rank_title(pts)
+            result.append({
+                "rank": rank,
+                "user_id": uid,
+                "username": uname or f"id{uid}",
+                "points": pts,
+                "badge": badge,
+                "title": title
+            })
+        return result
+
+async def get_user_respect(chat_id: int, user_id: int) -> dict:
+    """Возвращает респект конкретного пользователя и его ранг."""
+    async with get_db() as conn:
+        c1 = await conn.execute('SELECT points FROM user_respect WHERE chat_id = ? AND user_id = ?', (chat_id, user_id))
+        r1 = await c1.fetchone()
+        pts = r1[0] if r1 else 0
+        badge, title = get_respect_rank_title(pts)
+
+        c2 = await conn.execute('SELECT COUNT(*) + 1 FROM user_respect WHERE chat_id = ? AND points > ?', (chat_id, pts))
+        r2 = await c2.fetchone()
+        rank_pos = r2[0] if r2 else 1
+
+        return {
+            "user_id": user_id,
+            "points": pts,
+            "badge": badge,
+            "title": title,
+            "rank": rank_pos
+        }

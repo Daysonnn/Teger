@@ -1324,8 +1324,82 @@ def _collect_known_commands() -> None:
                     name = cmd.command if hasattr(cmd, 'command') else str(cmd)
                     KNOWN_COMMANDS.add(name.lower())
 
-    fallback = {"start", "help", "menu", "create", "delete", "join", "leave", "list", "add", "all", "everyone", "notify", "send", "party", "party_title", "alias", "unalias"}
+    fallback = {"start", "help", "menu", "create", "delete", "join", "leave", "list", "add", "all", "everyone", "notify", "send", "party", "party_title", "alias", "unalias", "top", "rep", "respect"}
     KNOWN_COMMANDS.update(fallback)
+
+
+RESPECT_KEYWORDS = {
+    "спс", "спасибо", "пасиб", "пасиба", "пасибо", "спсиб", "спасибочко", "спасибочки",
+    "респект", "отдуши", "от души", "thx", "thanks", "благодарю", "+1", "+", "бп", "сенкс"
+}
+
+async def process_respect_give(message: Message, target_user: User):
+    from_user = message.from_user
+    chat_id = message.chat.id
+    
+    target_un = f"@{target_user.username}" if target_user.username else target_user.first_name
+
+    status, value, (badge, title) = await db.give_respect(chat_id, from_user.id, target_user.id, target_un)
+
+    if status == "self":
+        await message.reply("😄 Сам себе респект не выпишешь!")
+    elif status == "cooldown":
+        mins = max(1, value // 60)
+        await message.reply(f"⏳ Вы уже давали респект {html.escape(target_un)} недавно. Подождите ещё ~{mins} мин.", parse_mode=ParseMode.HTML)
+    elif status == "success":
+        from_un = f"@{from_user.username}" if from_user.username else from_user.first_name
+        text = (
+            f"🤝 <b>{html.escape(from_un)}</b> выразил(а) респект <b>{html.escape(target_un)}</b>! (+1)\n"
+            f"📊 Всего очков: <b>{value}</b> | Ранг: {badge} <b>{title}</b>"
+        )
+        await message.reply(text, parse_mode=ParseMode.HTML)
+        await db.unlock_achievement(chat_id, target_user.id, "first_respect")
+
+
+@router.message(Command("top", "rep", "respect"))
+async def respect_top_cmd(message: Message, command: CommandObject):
+    if message.chat.type == ChatType.PRIVATE:
+        await message.reply("📋 Топ респекта доступен в группах!")
+        return
+
+    # Если команду вызвали в ответ на чье-то сообщение: /rep -> дать респект
+    if command.command in ("rep", "respect") and message.reply_to_message and message.reply_to_message.from_user:
+        await process_respect_give(message, message.reply_to_message.from_user)
+        return
+
+    chat_id = message.chat.id
+    top_users = await db.get_top_respect(chat_id, limit=10)
+    
+    if not top_users:
+        await message.reply(
+            "🏆 <b>Топ респекта группы</b>\n\n"
+            "<i>Пока никто не получил респект. Отвечайте «спасибо» или «+1» на сообщения участников!</i>",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    lines = ["🏆 <b>Топ лидеров респекта группы:</b>\n"]
+    for u in top_users:
+        rank_icon = "🥇" if u["rank"] == 1 else "🥈" if u["rank"] == 2 else "🥉" if u["rank"] == 3 else f"{u['rank']}."
+        lines.append(f"{rank_icon} <b>{html.escape(u['username'])}</b> — <b>{u['points']}</b> {u['badge']} ({u['title']})")
+
+    lines.append("\n💡 <i>Отвечайте «спс», «спасибо» или «+1» на сообщения, чтобы давать респект!</i>")
+    await message.reply("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+@router.message(F.text & F.reply_to_message)
+async def respect_text_trigger(message: Message):
+    if message.chat.type == ChatType.PRIVATE or not message.from_user or not message.reply_to_message.from_user:
+        return
+
+    clean_text = message.text.strip().lower()
+    first_word = clean_text.split()[0].rstrip("!.,?:;") if clean_text else ""
+    
+    if clean_text in RESPECT_KEYWORDS or first_word in RESPECT_KEYWORDS or clean_text.startswith("+1"):
+        target_user = message.reply_to_message.from_user
+        if target_user.is_bot:
+            return
+        await process_respect_give(message, target_user)
 
 
 @router.message(F.text.startswith("/"))
