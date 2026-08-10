@@ -8,7 +8,7 @@ from aiogram.filters import CommandObject, Command, CommandStart
 from aiogram.methods.base import TelegramMethod
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo,
-    InlineQuery, InlineQueryResultArticle, InputTextMessageContent
+    InlineQuery, InlineQueryResultArticle, InputTextMessageContent, User
 )
 from cachetools import TTLCache
 
