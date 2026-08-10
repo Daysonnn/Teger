@@ -1329,8 +1329,18 @@ def _collect_known_commands() -> None:
 
 
 RESPECT_KEYWORDS = {
+    # Спс / Спасибо вариации
     "спс", "спасибо", "пасиб", "пасиба", "пасибо", "спсиб", "спасибочко", "спасибочки",
-    "респект", "отдуши", "от души", "thx", "thanks", "благодарю", "+1", "+", "бп", "сенкс"
+    "пасибки", "пасибку", "спсибо", "спсб", "спасиб", "благодарю", "благодарочка", "благодарчик",
+    # Респект / Репа вариации
+    "респект", "respect", "реп", "+реп", "+rep", "плюсреп", "плюс реп", "репа", "+репа", "+репутация",
+    "отдуши", "от души", "душевный", "бп",
+    # Похвала / Одобрение
+    "красава", "красавчик", "лучший", "лучшая", "лудший", "лучш",
+    # Английский / Сленг
+    "thx", "thanks", "ty", "сенкс", "сэнкс",
+    # Плюсы
+    "+1", "+", "+100", "+100500", "+1000"
 }
 
 async def process_respect_give(message: Message, target_user: User):
@@ -1381,11 +1391,11 @@ async def respect_top_cmd(message: Message, command: CommandObject):
 
     lines = ["🏆 <b>Топ лидеров респекта группы:</b>\n"]
     for u in top_users:
-        rank_icon = "🥇" if u["rank"] == 1 else "🥈" if u["rank"] == 2 else "🥉" if u["rank"] == 3 else f"{u['rank']}."
+        rank_icon = f"{u['rank']}."
         badge_str = f"{u['badge']} " if u['badge'] else ""
         lines.append(f"{rank_icon} <b>{html.escape(u['username'])}</b> — <b>{u['points']}</b> {badge_str}({u['title']})")
 
-    lines.append("\n💡 <i>Отвечайте «спс», «спасибо» или «+1» на сообщения, чтобы давать респект!</i>")
+    lines.append("\n💡 <i>Отвечайте «спс», «спасибо», «+реп» или «+1» на сообщения, чтобы давать респект!</i>")
     await message.reply("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
@@ -1399,9 +1409,10 @@ async def respect_text_trigger(message: Message):
         return
 
     clean_text = message.text.strip().lower()
-    words = {w.strip("!.,?:;()") for w in clean_text.replace("\n", " ").split()}
+    words = {w.strip("!.,?:;()+-") for w in clean_text.replace("\n", " ").split()}
+    raw_words = set(clean_text.replace("\n", " ").split())
     
-    if (words & RESPECT_KEYWORDS) or "от души" in clean_text or clean_text.startswith("+1") or "+1" in words:
+    if (words & RESPECT_KEYWORDS) or (raw_words & RESPECT_KEYWORDS) or "от души" in clean_text or "плюс реп" in clean_text or clean_text.startswith("+"):
         await process_respect_give(message, target_user)
 
 

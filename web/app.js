@@ -663,7 +663,7 @@ async function fetchRespectTop() {
     list.forEach(u => {
       const row = document.createElement('div');
       row.className = 'list-item-row';
-      const rankIcon = u.rank === 1 ? '🥇' : u.rank === 2 ? '🥈' : u.rank === 3 ? '🥉' : `${u.rank}.`;
+      const rankIcon = `${u.rank}.`;
       const badgeStr = u.badge ? `${u.badge} ` : '';
       row.innerHTML = `
         <div class="item-main">

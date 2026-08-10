@@ -708,11 +708,11 @@ def get_respect_rank_title(points: int) -> tuple[str, str]:
     elif points >= 30:
         return ("", "Легенда")
     elif points >= 15:
-        return ("🥇", "Авторитет")
+        return ("", "Авторитет")
     elif points >= 5:
-        return ("🥈", "Уважаемый")
+        return ("", "Уважаемый")
     elif points >= 1:
-        return ("🥉", "Новичок")
+        return ("", "Новичок")
     else:
         return ("", "Прохожий")
 
