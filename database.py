@@ -210,6 +210,15 @@ async def record_chat_user(chat_id: int, user_id: int, username: str):
     except Exception:
         pass
 
+async def add_chat_user_by_username(chat_id: int, username: str) -> int:
+    """Добавляет участника в chat_users по юзернейму (с синтетическим ID)."""
+    clean_un = username.strip()
+    if not clean_un.startswith("@"):
+        clean_un = f"@{clean_un}"
+    synth_id = get_user_id_from_username(clean_un)
+    await record_chat_user(chat_id, synth_id, clean_un)
+    return synth_id
+
 async def add_audit_log(chat_id: int, user_id: int | None, username: str | None, action: str, details: str = ""):
     """Записывает действие в лог аудита чата."""
     try:

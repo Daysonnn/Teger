@@ -156,6 +156,20 @@ async function checkOwnerStatus() {
 }
 
 // ---- Roles ----
+function updateRoleSelectOptions(roles) {
+  const sel = document.getElementById('add-member-role-select');
+  if (!sel) return;
+  const currentVal = sel.value;
+  sel.innerHTML = '<option value="">Без роли (только в базу чата)</option>';
+  roles.forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r.name;
+    opt.textContent = `${r.emoji || '🛡️'} ${r.name}`;
+    sel.appendChild(opt);
+  });
+  if (currentVal) sel.value = currentVal;
+}
+
 async function fetchRoles() {
   const container = document.getElementById('roles-list');
   if (!chatId) {
@@ -165,13 +179,19 @@ async function fetchRoles() {
   // Show skeletons
   container.innerHTML = `<div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div>`;
   try {
-    const res = await fetch(`/api/roles?chat_id=${chatId}`);
+    let url = `/api/roles?chat_id=${chatId}`;
+    if (currentUser && currentUser.id) {
+      const uname = currentUser.username ? `@${currentUser.username}` : (currentUser.first_name || '');
+      url += `&user_id=${currentUser.id}&username=${encodeURIComponent(uname)}`;
+    }
+    const res = await fetch(url);
     const data = await res.json();
     allRolesCache = data.roles || [];
 
     animateCount(document.getElementById('stat-roles-count'), allRolesCache.length);
 
     renderRoles(allRolesCache);
+    updateRoleSelectOptions(allRolesCache);
   } catch {
     container.innerHTML = `<div class="loader-state" style="color:var(--red)">Ошибка соединения</div>`;
   }
@@ -334,6 +354,62 @@ function renderRoster(members) {
     frag.appendChild(row);
   });
   el.appendChild(frag);
+}
+
+async function handleAddMemberManual() {
+  const input = document.getElementById('add-member-input');
+  const roleSelect = document.getElementById('add-member-role-select');
+  if (!input) return;
+  const rawUsernames = input.value.trim();
+  if (!rawUsernames) {
+    toast('Введите @username');
+    return;
+  }
+  if (!chatId) {
+    toast('Ошибка: нет ID чата');
+    return;
+  }
+
+  const roleName = roleSelect ? roleSelect.value : '';
+  haptic('light');
+
+  try {
+    const res = await apiPost('/api/chat_members/add', {
+      chat_id: chatId,
+      username: rawUsernames,
+      role_name: roleName
+    });
+
+    if (res.status === 'success') {
+      toast(`Добавлено участников: ${res.count}`);
+      input.value = '';
+      await fetchChatMembers();
+      await fetchRoles();
+    } else {
+      toast(res.error || 'Ошибка при добавлении');
+    }
+  } catch {
+    toast('Ошибка соединения');
+  }
+}
+
+async function syncAdminsFromWebApp() {
+  if (!chatId) return;
+  haptic('medium');
+  toast('Синхронизация админов...');
+  try {
+    const res = await fetch(`/api/chat_members/sync?chat_id=${chatId}`);
+    const data = await res.json();
+    if (data.status === 'success') {
+      toast(`Синхронизировано: ${data.synced} админов`);
+      await fetchChatMembers();
+      await fetchRoles();
+    } else {
+      toast(data.error || 'Ошибка синхронизации');
+    }
+  } catch {
+    toast('Ошибка соединения');
+  }
 }
 
 // ---- Audit logs ----

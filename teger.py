@@ -40,6 +40,7 @@ async def setup_commands(bot: Bot):
         BotCommand(command="menu", description="Панель управления ролями"),
         BotCommand(command="party", description="Собрать группу (например: /party 5 CS2)"),
         BotCommand(command="all", description="Позвать всех участников чата"),
+        BotCommand(command="sync", description="(Админ) Синхронизировать участников"),
         BotCommand(command="notify", description="(Админ) Срочное уведомление роли"),
         BotCommand(command="help", description="Справка"),
         BotCommand(command="list", description="Список ролей"),
@@ -50,8 +51,8 @@ async def setup_commands(bot: Bot):
     ]
     await bot.set_my_commands(commands)
 
-async def start_web_server():
-    app = create_web_app()
+async def start_web_server(bot: Bot):
+    app = create_web_app(bot=bot)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', PORT)
@@ -76,8 +77,6 @@ async def main():
     print("🚀 Инициализация БД...")
     await db.init_db()
 
-    web_runner = await start_web_server()
-
     if PROXY:
         print(f"🔒 Использование прокси из .env: {PROXY}")
         session = CustomAiohttpSession(proxy=PROXY)
@@ -85,6 +84,8 @@ async def main():
     else:
         print("🌐 Прямое подключение к Telegram API")
         bot = Bot(token=TOKEN)
+
+    web_runner = await start_web_server(bot)
 
     dp = Dispatcher()
     dp.include_router(handlers.router)
@@ -98,7 +99,10 @@ async def main():
 
     try:
         print("🤖 Бот запущен и ожидает сообщений...")
-        await dp.start_polling(bot)
+        await dp.start_polling(
+            bot,
+            allowed_updates=["message", "callback_query", "chat_member", "my_chat_member", "inline_query"]
+        )
     finally:
         await web_runner.cleanup()
         await bot.session.close()

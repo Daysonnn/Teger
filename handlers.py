@@ -1,14 +1,16 @@
 import os
 import html
 import time
+import asyncio
 import logging
 from aiogram import Router, F, Bot, BaseMiddleware
 from aiogram.enums import ChatType, ParseMode
 from aiogram.filters import CommandObject, Command, CommandStart
+from aiogram.filters.chat_member_updated import ChatMemberUpdatedFilter, JOIN_TRANSITION
 from aiogram.methods.base import TelegramMethod
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo,
-    InlineQuery, InlineQueryResultArticle, InputTextMessageContent, User
+    InlineQuery, InlineQueryResultArticle, InputTextMessageContent, User, ChatMemberUpdated
 )
 from cachetools import TTLCache
 
@@ -18,6 +20,79 @@ import database as db
 _admin_cache: TTLCache = TTLCache(maxsize=512, ttl=60)
 
 router = Router()
+
+async def sync_chat_administrators(bot: Bot, chat_id: int) -> int:
+    """Синхронизирует всех администраторов чата в таблицу chat_users."""
+    try:
+        admins = await bot.get_chat_administrators(chat_id)
+        count = 0
+        for admin in admins:
+            if not admin.user.is_bot:
+                uname = f"@{admin.user.username}" if admin.user.username else admin.user.first_name
+                await db.record_chat_user(chat_id, admin.user.id, uname)
+                count += 1
+        return count
+    except Exception as e:
+        logging.error(f"Error syncing chat administrators for {chat_id}: {e}")
+        return 0
+
+@router.my_chat_member(ChatMemberUpdatedFilter(member_status_changed=JOIN_TRANSITION))
+async def on_bot_added(event: ChatMemberUpdated, bot: Bot):
+    """Срабатывает когда бота добавляют в группу или назначают админом."""
+    chat_id = event.chat.id
+    if event.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
+        # 1. Сразу подтягиваем всех админов
+        await sync_chat_administrators(bot, chat_id)
+
+        # 2. Запоминаем того, кто добавил бота
+        if event.from_user and not event.from_user.is_bot:
+            u = event.from_user
+            uname = f"@{u.username}" if u.username else u.first_name
+            await db.record_chat_user(chat_id, u.id, uname)
+
+        # 3. Отправляем онбординг-сообщение
+        webapp_url = os.getenv("WEBAPP_URL")
+        kb_buttons = []
+        if webapp_url:
+            kb_buttons.append([InlineKeyboardButton(text="📱 Выбрать роли (Mini App)", web_app=WebAppInfo(url=f"{webapp_url}?chat_id={chat_id}"))])
+        kb_buttons.append([
+            InlineKeyboardButton(text="📋 Список ролей", callback_data="btn_list_roles"),
+            InlineKeyboardButton(text="ℹ️ Справка", callback_data="btn_help")
+        ])
+        keyboard = InlineKeyboardMarkup(inline_keyboard=kb_buttons)
+
+        welcome_text = (
+            "👋 <b>Teger успешно активирован в группе!</b>\n\n"
+            "🛡️ <b>Что я умею:</b>\n"
+            "• Раздавать роли участникам через удобный Mini App\n"
+            "• Призывать роли: <code>/название_роли</code>\n"
+            "• Собирать пати для игр и дел: <code>/party 5 Название</code>\n"
+            "• Синхронизировать участников: <code>/sync</code>\n\n"
+            "💡 <i>Нажмите кнопку ниже, чтобы зайти в Mini App и разобрать роли!</i>"
+        )
+        try:
+            await bot.send_message(chat_id, welcome_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        except Exception as e:
+            logging.error(f"Failed to send welcome message in {chat_id}: {e}")
+
+@router.chat_member(ChatMemberUpdatedFilter(member_status_changed=JOIN_TRANSITION))
+async def on_user_joined(event: ChatMemberUpdated):
+    """Срабатывает когда участник вступает в чат или его добавляют инвайтом."""
+    if event.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
+        user = event.new_chat_member.user
+        if user and not user.is_bot:
+            uname = f"@{user.username}" if user.username else user.first_name
+            await db.record_chat_user(event.chat.id, user.id, uname)
+
+@router.message(F.new_chat_members)
+async def on_new_chat_members(message: Message):
+    """Срабатывает на сервисное сообщение о добавлении пользователей."""
+    if not message.new_chat_members:
+        return
+    for user in message.new_chat_members:
+        if not user.is_bot:
+            uname = f"@{user.username}" if user.username else user.first_name
+            await db.record_chat_user(message.chat.id, user.id, uname)
 
 class UserRecorderMiddleware(BaseMiddleware):
     async def __call__(self, handler, event: Message, data: dict):
@@ -311,6 +386,9 @@ async def start_cmd(message: Message, command: CommandObject):
         }
     ]
 
+    if not is_priv:
+        asyncio.create_task(sync_chat_administrators(message.bot, chat_id))
+
     await send_smart_message(message.bot, chat_id, html_text, reply_markup=keyboard, rich_blocks=rich_blocks)
 
 
@@ -319,6 +397,8 @@ async def start_cmd(message: Message, command: CommandObject):
 async def help_cmd(message: Message):
     chat_id = message.chat.id
     is_priv = (message.chat.type == ChatType.PRIVATE)
+    if not is_priv:
+        asyncio.create_task(sync_chat_administrators(message.bot, chat_id))
     roles = await db.get_all_roles(chat_id)
     total_members = 0
     for r in roles:
@@ -887,9 +967,28 @@ async def add_to_role(message: Message, command: CommandObject, bot: Bot):
         parse_mode=ParseMode.HTML
     )
 
+@router.message(Command("sync"))
+async def cmd_sync(message: Message, bot: Bot):
+    if not await is_group(message): return
+    if not await check_admin(bot, message):
+        await message.reply("⛔ Эта команда доступна только <b>администраторам</b> группы.", parse_mode=ParseMode.HTML)
+        return
+
+    status_msg = await message.reply("🔄 Синхронизирую администраторов и участников группы...")
+    synced = await sync_chat_administrators(bot, message.chat.id)
+    all_users = await db.get_all_chat_users(message.chat.id)
+    
+    await status_msg.edit_text(
+        f"✅ <b>Синхронизация завершена!</b>\n\n"
+        f"• Синхронизировано администраторов: <b>{synced}</b>\n"
+        f"• Всего зарегистрировано участников: <b>{len(all_users)}</b> чел.\n\n"
+        f"💡 <i>Новые участники при входе или открытии Mini App добавляются автоматически.</i>",
+        parse_mode=ParseMode.HTML
+    )
+
 @router.message(Command("all"))
 @router.message(Command("everyone"))
-async def call_all_members(message: Message):
+async def call_all_members(message: Message, bot: Bot):
     if not await is_group(message): return
     chat_id = message.chat.id
     
@@ -900,17 +999,32 @@ async def call_all_members(message: Message):
     
     members = await db.get_all_chat_users(chat_id)
     if not members:
-        await message.reply("👥 В группе пока нет зарегистрированных участников.")
+        # Автоматически пытаемся синхронизировать админов, если база пустая
+        await sync_chat_administrators(bot, chat_id)
+        members = await db.get_all_chat_users(chat_id)
+
+    if not members:
+        await message.reply("👥 В группе пока нет зарегистрированных участников.\nИспользуйте /sync для подтягивания админов.")
         return
 
-    mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
-    mentions_str = ", ".join(f"👤 {m}" for m in mentions_list)
+    if len(members) <= 12:
+        mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
+        mentions_str = ", ".join(f"👤 {m}" for m in mentions_list)
 
-    text = (
-        f"📢 <b>Призыв ВСЕХ участников чата!</b> ({len(members)} чел.)\n"
-        f"<blockquote>{mentions_str}</blockquote>"
-    )
-    await message.reply(text, parse_mode=ParseMode.HTML)
+        text = (
+            f"📢 <b>Призыв ВСЕХ участников чата!</b> ({len(members)} чел.)\n"
+            f"<blockquote>{mentions_str}</blockquote>"
+        )
+        await message.reply(text, parse_mode=ParseMode.HTML)
+    else:
+        # Разбиваем на батчи по 8 человек: гарантирует доставку push-уведомлений и защиту от лимита в 4096 символов
+        await message.reply(f"📢 <b>Призыв ВСЕХ участников чата!</b> ({len(members)} чел.):", parse_mode=ParseMode.HTML)
+        batch_size = 8
+        for i in range(0, len(members), batch_size):
+            chunk = members[i:i + batch_size]
+            chunk_mentions = ", ".join(f"👤 {format_user_mention(uid, uname)}" for uid, uname in chunk)
+            await message.answer(f"<blockquote>{chunk_mentions}</blockquote>", parse_mode=ParseMode.HTML)
+            await asyncio.sleep(0.6)
 
 def format_party_message(party: dict) -> tuple[list | None, str, InlineKeyboardMarkup | None]:
     """Форматирует динамически обновляемое сообщение сбора пати."""
@@ -1283,7 +1397,7 @@ def _collect_known_commands() -> None:
                     name = cmd.command if hasattr(cmd, 'command') else str(cmd)
                     KNOWN_COMMANDS.add(name.lower())
 
-    fallback = {"start", "help", "menu", "create", "delete", "join", "leave", "list", "add", "all", "everyone", "notify", "send", "party", "party_title", "alias", "unalias", "top", "rep", "respect"}
+    fallback = {"start", "help", "menu", "sync", "create", "delete", "join", "leave", "list", "add", "all", "everyone", "notify", "send", "party", "party_title", "alias", "unalias", "top", "rep", "respect"}
     KNOWN_COMMANDS.update(fallback)
 
 

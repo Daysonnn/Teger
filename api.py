@@ -1,4 +1,5 @@
 import os
+import re
 import logging
 from aiohttp import web
 import database as db
@@ -19,6 +20,19 @@ async def handle_get_roles(request: web.Request):
     
     try:
         chat_id = int(chat_id)
+
+        # Автоматическая фиксация участника в БД чата при открытии Mini App
+        user_id = request.query.get("user_id")
+        username = request.query.get("username")
+        if user_id:
+            try:
+                uid_int = int(user_id)
+                if uid_int > 0:
+                    clean_un = username if (username and username.startswith("@")) else (f"@{username}" if username else f"User {uid_int}")
+                    await db.record_chat_user(chat_id, uid_int, clean_un)
+            except (ValueError, TypeError):
+                pass
+
         roles_with_emoji = await db.get_all_roles_with_details(chat_id)
         roles_data = []
         
@@ -151,6 +165,19 @@ async def handle_get_chat_members(request: web.Request):
     try:
         chat_id_int = int(chat_id)
         members = await db.get_all_chat_users(chat_id_int)
+
+        # Если участников в базе ещё 0, пробуем автоматически подтянуть администраторов группы
+        bot = request.app.get("bot")
+        if not members and bot:
+            try:
+                admins = await bot.get_chat_administrators(chat_id_int)
+                for adm in admins:
+                    if not adm.user.is_bot:
+                        un = f"@{adm.user.username}" if adm.user.username else adm.user.first_name
+                        await db.record_chat_user(chat_id_int, adm.user.id, un)
+                members = await db.get_all_chat_users(chat_id_int)
+            except Exception as e:
+                logging.error(f"Auto-sync admins failed in handle_get_chat_members: {e}")
         
         roles = await db.get_all_roles(chat_id_int)
         user_roles_map = {}
@@ -180,6 +207,58 @@ async def handle_get_chat_members(request: web.Request):
         return web.json_response({"members": result})
     except Exception as e:
         logging.error(f"Error fetching chat members: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+async def handle_sync_chat_members(request: web.Request):
+    chat_id = request.query.get("chat_id")
+    if not chat_id:
+        return web.json_response({"error": "chat_id is required"}, status=400)
+    
+    bot = request.app.get("bot")
+    if not bot:
+        return web.json_response({"error": "Bot instance not configured"}, status=500)
+    
+    try:
+        chat_id_int = int(chat_id)
+        admins = await bot.get_chat_administrators(chat_id_int)
+        synced = 0
+        for adm in admins:
+            if not adm.user.is_bot:
+                un = f"@{adm.user.username}" if adm.user.username else adm.user.first_name
+                await db.record_chat_user(chat_id_int, adm.user.id, un)
+                synced += 1
+        return web.json_response({"status": "success", "synced": synced})
+    except Exception as e:
+        logging.error(f"Error syncing chat members in API: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+async def handle_add_chat_member(request: web.Request):
+    data = await request.json()
+    chat_id = data.get("chat_id")
+    raw_usernames = data.get("username", "")
+    role_name = data.get("role_name")
+
+    if not chat_id or not raw_usernames:
+        return web.json_response({"error": "chat_id and username are required"}, status=400)
+
+    try:
+        chat_id_int = int(chat_id)
+        items = [u.strip() for u in re.split(r'[,\s]+', raw_usernames) if u.strip()]
+        if not items:
+            return web.json_response({"error": "No valid usernames provided"}, status=400)
+
+        added = []
+        for un in items:
+            clean_un = un if un.startswith("@") else f"@{un}"
+            synth_id = db.get_user_id_from_username(clean_un)
+            await db.record_chat_user(chat_id_int, synth_id, clean_un)
+            if role_name:
+                await db.join_role(chat_id_int, role_name, synth_id, clean_un)
+            added.append(clean_un)
+
+        return web.json_response({"status": "success", "count": len(added), "members": added})
+    except Exception as e:
+        logging.error(f"Error adding chat members: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_get_audit_logs(request: web.Request):
@@ -331,11 +410,15 @@ async def handle_admin_set_respect(request: web.Request):
 async def handle_index(request: web.Request):
     return web.FileResponse(os.path.join(os.path.dirname(__file__), "web", "index.html"))
 
-def create_web_app() -> web.Application:
+def create_web_app(bot=None) -> web.Application:
     app = web.Application()
+    if bot:
+        app["bot"] = bot
     app.router.add_get("/", handle_index)
     app.router.add_get("/api/roles", handle_get_roles)
     app.router.add_get("/api/chat_members", handle_get_chat_members)
+    app.router.add_get("/api/chat_members/sync", handle_sync_chat_members)
+    app.router.add_post("/api/chat_members/add", handle_add_chat_member)
     app.router.add_get("/api/audit_logs", handle_get_audit_logs)
     app.router.add_get("/api/achievements", handle_get_achievements)
     app.router.add_get("/api/respect_top", handle_get_respect_top)

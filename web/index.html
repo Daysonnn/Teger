@@ -107,10 +107,33 @@
         </div>
       </div>
 
+      <!-- Форма быстрого добавления участников -->
+      <div class="card" id="card-add-member">
+        <div class="card-title-row">
+          <span class="card-title">➕ Добавить участника</span>
+          <span class="card-mono">quick.add</span>
+        </div>
+        <div class="field-wrap">
+          <label class="field-label" for="add-member-input">Юзернейм</label>
+          <input type="text" id="add-member-input" class="field-input" placeholder="@username (можно несколько через пробел)">
+        </div>
+        <div class="field-wrap">
+          <label class="field-label" for="add-member-role-select">Роль</label>
+          <select id="add-member-role-select" class="field-input" style="cursor: pointer;">
+            <option value="">Без роли (только в базу чата)</option>
+          </select>
+        </div>
+        <button class="btn-primary full-width" onclick="handleAddMemberManual()" style="margin-top: 4px;">
+          ➕ Добавить участника
+        </button>
+      </div>
+
       <div class="card">
         <div class="card-title-row">
           <span class="card-title">Участники чата</span>
-          <span class="card-mono">members.db</span>
+          <button class="link-btn" onclick="syncAdminsFromWebApp()" title="Синхронизировать администраторов чата">
+            🔄 Синхронизировать
+          </button>
         </div>
         <div id="roster-list" class="list-feed">
           <div class="loader-state">Загрузка...</div>
