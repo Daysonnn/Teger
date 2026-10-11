@@ -37,17 +37,17 @@ class CustomAiohttpSession(AiohttpSession):
 
 async def setup_commands(bot: Bot):
     commands = [
-        BotCommand(command="menu", description="Панель управления ролями", is_ephemeral=True),
+        BotCommand(command="menu", description="Панель управления ролями"),
         BotCommand(command="party", description="Собрать группу (например: /party 5 CS2)"),
         BotCommand(command="all", description="Позвать всех участников чата"),
-        BotCommand(command="sync", description="(Админ) Синхронизировать участников", is_ephemeral=True),
+        BotCommand(command="sync", description="(Админ) Синхронизировать участников"),
         BotCommand(command="notify", description="(Админ) Срочное уведомление роли"),
-        BotCommand(command="help", description="Справка", is_ephemeral=True),
-        BotCommand(command="list", description="Список ролей", is_ephemeral=True),
-        BotCommand(command="join", description="Вступить в роль", is_ephemeral=True),
-        BotCommand(command="leave", description="Выйти из роли", is_ephemeral=True),
-        BotCommand(command="create", description="(Админ) Создать роль", is_ephemeral=True),
-        BotCommand(command="delete", description="(Админ) Удалить роль", is_ephemeral=True),
+        BotCommand(command="help", description="Справка"),
+        BotCommand(command="list", description="Список ролей"),
+        BotCommand(command="join", description="Вступить в роль"),
+        BotCommand(command="leave", description="Выйти из роли"),
+        BotCommand(command="create", description="(Админ) Создать роль"),
+        BotCommand(command="delete", description="(Админ) Удалить роль"),
     ]
     await bot.set_my_commands(commands)
 

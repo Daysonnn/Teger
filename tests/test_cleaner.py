@@ -162,7 +162,7 @@ async def test_reply_temp_instant_trigger_deletion():
 
 
 @pytest.mark.asyncio
-async def test_setup_commands_ephemeral_flags():
+async def test_setup_commands():
     from teger import setup_commands
     mock_bot = MagicMock()
     mock_bot.set_my_commands = AsyncMock()
@@ -171,12 +171,58 @@ async def test_setup_commands_ephemeral_flags():
     mock_bot.set_my_commands.assert_called_once()
     commands = mock_bot.set_my_commands.call_args[0][0]
     
-    cmd_dict = {c.command: c.is_ephemeral for c in commands}
-    assert cmd_dict.get("menu") is True
-    assert cmd_dict.get("help") is True
-    assert cmd_dict.get("list") is True
-    assert cmd_dict.get("sync") is True
-    assert cmd_dict.get("join") is True
-    assert cmd_dict.get("party") is not True  # Пати публична для чата
-    assert cmd_dict.get("all") is not True    # All публичен для чата
+    # Команды регистрируются стандартно, чтобы бот мог мгновенно удалять их из чата
+    cmd_dict = {c.command: c.description for c in commands}
+    assert "menu" in cmd_dict
+    assert "help" in cmd_dict
+    assert "list" in cmd_dict
+    assert "sync" in cmd_dict
+    # is_ephemeral не должен быть True, иначе Telegram не позволяет боту удалять команду пользователя
+    for c in commands:
+        assert getattr(c, "is_ephemeral", None) is not True
+
+
+@pytest.mark.asyncio
+async def test_send_smart_message_receiver_user_id_group_isolation():
+    from handlers import send_smart_message
+
+    mock_bot = MagicMock()
+    # 1. Тест: нативная отправка с receiver_user_id
+    mock_bot.send_message = AsyncMock(return_value=MagicMock(message_id=555))
+    
+    await send_smart_message(
+        mock_bot, 
+        chat_id=-100123456, 
+        html_text="Private text", 
+        receiver_user_id=777
+    )
+    # Проверяем, что передается receiver_user_id
+    mock_bot.send_message.assert_called_once()
+    assert mock_bot.send_message.call_args[1].get("receiver_user_id") == 777
+
+    # 2. Тест: если в группе отправка эфемерного не удалась (ошибка прав или формата),
+    # меню ОБЯЗАНО уйти в ЛС (chat_id=receiver_user_id), а НЕ в общий чат (-100123456)
+    mock_bot_fallback = MagicMock()
+    mock_bot_fallback.get_me = AsyncMock(return_value=MagicMock(username="testbot"))
+    
+    # Первый вызов (в группе) падает
+    async def side_effect(*args, **kwargs):
+        if kwargs.get("receiver_user_id") == 777:
+            raise Exception("TelegramBadRequest: ephemeral messages not supported")
+        return MagicMock(message_id=999)
+
+    mock_bot_fallback.send_message = AsyncMock(side_effect=side_effect)
+
+    await send_smart_message(
+        mock_bot_fallback,
+        chat_id=-100123456,
+        html_text="Secret Menu",
+        receiver_user_id=777
+    )
+    # Второй вызов send_message должен быть отправлен в ЛС: chat_id=777!
+    # Он НИ В КОЕМ СЛУЧАЕ не должен быть отправлен в chat_id=-100123456!
+    assert mock_bot_fallback.send_message.call_count == 2
+    second_call_kwargs = mock_bot_fallback.send_message.call_args_list[1][1]
+    assert second_call_kwargs.get("chat_id") == 777
+
 

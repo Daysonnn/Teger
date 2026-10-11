@@ -33,6 +33,19 @@ async def _safe_delete_message(
     receiver_user_id: Optional[int] = None
 ) -> bool:
     """Безопасно удаляет сообщение (обычное или эфемерное), подавляя ошибки отсутствия прав или уже удаленного сообщения."""
+    # 1. Сначала пробуем стандартное удаление
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+        return True
+    except TelegramBadRequest as e:
+        msg = str(e).lower()
+        if "message to delete not found" in msg:
+            return False
+        logger.debug(f"Standard delete failed ({e}), checking ephemeral delete")
+    except Exception as e:
+        logger.debug(f"Standard delete failed: {e}")
+
+    # 2. Если стандартное не удалось (например, сообщение помечено как эфемерное) и передан receiver_user_id
     if receiver_user_id is not None:
         try:
             await bot(DeleteEphemeralMessage(
@@ -44,18 +57,7 @@ async def _safe_delete_message(
         except Exception:
             pass
 
-    try:
-        await bot.delete_message(chat_id=chat_id, message_id=message_id)
-        return True
-    except TelegramBadRequest as e:
-        msg = str(e).lower()
-        if "message to delete not found" in msg or "message can't be deleted" in msg:
-            return False
-        logger.debug(f"Failed to delete message {message_id} in {chat_id}: {e}")
-        return False
-    except (TelegramForbiddenError, Exception) as e:
-        logger.debug(f"Failed to delete message {message_id} in {chat_id}: {e}")
-        return False
+    return False
 
 async def _delayed_delete_worker(
     bot: Bot, 
@@ -99,10 +101,11 @@ async def reply_temp(
     bot = message.bot
     chat_id = message.chat.id
     is_private = (message.chat.type == ChatType.PRIVATE)
+    user_id = message.from_user.id if message.from_user else None
 
     # Мгновенно удаляем команду пользователя, чтобы чат не засорялся
     if not is_private and delete_trigger and message.message_id:
-        asyncio.create_task(_safe_delete_message(bot, chat_id, message.message_id))
+        asyncio.create_task(_safe_delete_message(bot, chat_id, message.message_id, receiver_user_id=user_id))
 
     try:
         sent_msg = await message.reply(

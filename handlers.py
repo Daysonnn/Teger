@@ -163,6 +163,8 @@ class SendEphemeralMessage(TelegramMethod[Message]):
     parse_mode: str | None = None
     reply_markup: InlineKeyboardMarkup | None = None
     ephemeral_message_parameters: dict | None = None
+    receiver_user_id: int | None = None
+    reply_parameters: dict | None = None
 
 async def send_smart_message(
     bot: Bot, 
@@ -174,36 +176,72 @@ async def send_smart_message(
     receiver_user_id: int | None = None
 ) -> Message:
     """
-    Пытается отправить нативный Rich Message или эфемерное сообщение (видимое только receiver_user_id),
-    а при необходимости автоматически фоллбэчится на проверенный HTML.
+    Отправляет сообщение. Если указан receiver_user_id, сообщение гарантированно
+    скрывается от остальных участников группы: сначала пробуется нативное эфемерное сообщение,
+    а при невозможности доставки в группе — отправляется пользователю в ЛС.
     """
-    ephemeral_params = {"receiver_user_id": receiver_user_id} if receiver_user_id else None
-
-    if rich_blocks:
-        try:
-            return await bot(SendRichMessage(
-                chat_id=chat_id,
-                rich_message={"blocks": rich_blocks},
-                reply_markup=reply_markup,
-                ephemeral_message_parameters=ephemeral_params
-            ))
-        except Exception as e:
-            logging.debug(f"RichMessage error: {e}")
-
     safe_text = html_text if (html_text and html_text.strip()) else "📋 <b>Информация</b>"
 
-    if ephemeral_params:
+    # Если запрошено персональное/невидимое для других сообщение в группе:
+    if receiver_user_id:
+        ephemeral_params = {"receiver_user_id": receiver_user_id}
+        reply_params = {"message_id": reply_to_message_id} if reply_to_message_id else None
+
+        # 1. Пробуем отправить нативное эфемерное сообщение в группе (видно ТОЛЬКО receiver_user_id)
         try:
-            return await bot(SendEphemeralMessage(
+            return await bot.send_message(
                 chat_id=chat_id,
                 text=safe_text,
                 parse_mode=ParseMode.HTML,
                 reply_markup=reply_markup,
-                ephemeral_message_parameters=ephemeral_params
-            ))
-        except Exception as e:
-            logging.debug(f"Ephemeral sendMessage failed ({e}), falling back to standard sendMessage")
+                receiver_user_id=receiver_user_id
+            )
+        except Exception as e1:
+            logging.debug(f"bot.send_message with receiver_user_id failed ({e1}), trying SendEphemeralMessage fallback")
+            try:
+                return await bot(SendEphemeralMessage(
+                    chat_id=chat_id,
+                    text=safe_text,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=reply_markup,
+                    receiver_user_id=receiver_user_id,
+                    ephemeral_message_parameters={"receiver_user_id": receiver_user_id}
+                ))
+            except Exception as e2:
+                logging.warning(f"Native ephemeral message failed in group ({e2}). Falling back to PM to prevent leaking to other members.")
 
+        # 2. Если в группе отправить эфемерно не удалось (нет прав у бота) —
+        # отправляем меню В ЛИЧНЫЕ СООБЩЕНИЯ пользователю, чтобы никто в группе его не увидел!
+        try:
+            bot_info = await bot.get_me()
+            pm_keyboard = get_main_menu_keyboard(
+                chat_id, 
+                is_private=True, 
+                owner_id=receiver_user_id, 
+                bot_username=bot_info.username
+            )
+            return await bot.send_message(
+                chat_id=receiver_user_id,
+                text=safe_text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=pm_keyboard
+            )
+        except Exception as pm_err:
+            logging.warning(f"Failed to send menu to user {receiver_user_id} in PM: {pm_err}")
+            # Пользователь не нажал Start в ЛС. Отправляем в чат короткую ссылку (исчезнет через 4 сек)
+            bot_info = await bot.get_me()
+            temp_kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="📩 Открыть меню в ЛС", url=f"https://t.me/{bot_info.username}?start=menu_{chat_id}")
+            ]])
+            temp_msg = await bot.send_message(
+                chat_id=chat_id,
+                text="🔒 Меню отправлено вам в ЛС. Если диалог не начат — нажмите кнопку:",
+                reply_markup=temp_kb
+            )
+            schedule_delete(bot, chat_id, temp_msg.message_id, delay_seconds=4.0)
+            return temp_msg
+
+    # Публичное сообщение (для чата в целом)
     return await bot.send_message(
         chat_id=chat_id,
         text=safe_text,
@@ -496,6 +534,10 @@ async def help_cmd(message: Message):
     is_priv = (message.chat.type == ChatType.PRIVATE)
     user = message.from_user
     owner_id = user.id if user else None
+
+    # Мгновенно удаляем команду пользователя из группы, чтобы не засорять чат
+    if not is_priv and message.message_id:
+        asyncio.create_task(_safe_delete_message(message.bot, chat_id, message.message_id, receiver_user_id=owner_id))
 
     if not is_priv:
         asyncio.create_task(sync_chat_administrators(message.bot, chat_id))
@@ -1003,6 +1045,11 @@ async def list_roles(message: Message):
     if not await is_group(message): return
 
     chat_id = message.chat.id
+    user_id = message.from_user.id if message.from_user else None
+
+    # Мгновенно удаляем команду пользователя
+    if message.message_id:
+        asyncio.create_task(_safe_delete_message(message.bot, chat_id, message.message_id, receiver_user_id=user_id))
     roles_data = await db.get_all_roles_with_details(chat_id)
     bot_info = await message.bot.get_me()
     keyboard = get_main_menu_keyboard(
@@ -1171,6 +1218,10 @@ async def add_to_role(message: Message, command: CommandObject, bot: Bot):
 @router.message(Command("sync"))
 async def cmd_sync(message: Message, bot: Bot):
     if not await is_group(message): return
+
+    if message.message_id:
+        asyncio.create_task(_safe_delete_message(bot, message.chat.id, message.message_id, receiver_user_id=message.from_user.id if message.from_user else None))
+
     if not await check_admin(bot, message):
         await reply_temp(message, "⛔ Эта команда доступна только <b>администраторам</b> группы.", delay=TIMEOUT_WARNING)
         return
