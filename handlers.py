@@ -15,6 +15,10 @@ from aiogram.types import (
 from cachetools import TTLCache
 
 import database as db
+from cleaner import (
+    reply_temp, schedule_delete, _safe_delete_message, menu_tracker,
+    TIMEOUT_WARNING, TIMEOUT_USAGE, TIMEOUT_SUCCESS, TIMEOUT_SYNC, TIMEOUT_MENU
+)
 
 # Кэш результатов check_admin: ключ (chat_id, user_id) → True/False, 60 сек
 _admin_cache: TTLCache = TTLCache(maxsize=512, ttl=60)
@@ -147,6 +151,18 @@ class SendRichMessage(TelegramMethod[Message]):
     chat_id: int | str
     rich_message: dict
     reply_markup: InlineKeyboardMarkup | None = None
+    ephemeral_message_parameters: dict | None = None
+
+class SendEphemeralMessage(TelegramMethod[Message]):
+    """Метод Telegram Bot API 10.2+ для отправки эфемерных сообщений конкретному пользователю."""
+    __returning__ = Message
+    __api_method__ = "sendMessage"
+
+    chat_id: int | str
+    text: str
+    parse_mode: str | None = None
+    reply_markup: InlineKeyboardMarkup | None = None
+    ephemeral_message_parameters: dict | None = None
 
 async def send_smart_message(
     bot: Bot, 
@@ -154,22 +170,43 @@ async def send_smart_message(
     html_text: str, 
     reply_markup: InlineKeyboardMarkup | None = None, 
     rich_blocks: list | None = None,
-    reply_to_message_id: int | None = None
+    reply_to_message_id: int | None = None,
+    receiver_user_id: int | None = None
 ) -> Message:
-    """Пытается отправить нативный Rich Message (Bot API 10.1+), а при ошибке автоматически фоллбэчится на проверенный HTML."""
+    """
+    Пытается отправить нативный Rich Message или эфемерное сообщение (видимое только receiver_user_id),
+    а при необходимости автоматически фоллбэчится на проверенный HTML.
+    """
+    ephemeral_params = {"receiver_user_id": receiver_user_id} if receiver_user_id else None
+
     if rich_blocks:
         try:
             return await bot(SendRichMessage(
                 chat_id=chat_id,
                 rich_message={"blocks": rich_blocks},
-                reply_markup=reply_markup
+                reply_markup=reply_markup,
+                ephemeral_message_parameters=ephemeral_params
             ))
         except Exception as e:
-            logging.error(f"RichMessage error: {e}")
+            logging.debug(f"RichMessage error: {e}")
+
+    safe_text = html_text if (html_text and html_text.strip()) else "📋 <b>Информация</b>"
+
+    if ephemeral_params:
+        try:
+            return await bot(SendEphemeralMessage(
+                chat_id=chat_id,
+                text=safe_text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup,
+                ephemeral_message_parameters=ephemeral_params
+            ))
+        except Exception as e:
+            logging.debug(f"Ephemeral sendMessage failed ({e}), falling back to standard sendMessage")
 
     return await bot.send_message(
         chat_id=chat_id,
-        text=html_text,
+        text=safe_text,
         parse_mode=ParseMode.HTML,
         reply_markup=reply_markup,
         reply_to_message_id=reply_to_message_id
@@ -225,8 +262,8 @@ async def edit_smart_message(
             return True
         raise
 
-def get_main_menu_keyboard(chat_id: int, is_private: bool = False) -> InlineKeyboardMarkup:
-    """Главное меню с кнопкой Mini App."""
+def get_main_menu_keyboard(chat_id: int, is_private: bool = False, owner_id: int | None = None, bot_username: str | None = None) -> InlineKeyboardMarkup:
+    """Главное меню с кнопкой Mini App, защитой по owner_id и кнопкой закрытия."""
     webapp_url = os.getenv("WEBAPP_URL")
     buttons = []
     
@@ -235,26 +272,38 @@ def get_main_menu_keyboard(chat_id: int, is_private: bool = False) -> InlineKeyb
             url = f"{webapp_url}?chat_id={chat_id}"
             btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", web_app=WebAppInfo(url=url))
         else:
-            # Нативный диплинк Telegram (startapp) - открывает шторку Mini App прямо в Телеграме поверх группы!
-            tg_app_link = f"https://t.me/tegerrbot?startapp={chat_id}"
+            username = bot_username or "tegerrbot"
+            tg_app_link = f"https://t.me/{username}?startapp={chat_id}"
             btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", url=tg_app_link)
         buttons.append([btn])
     
+    owner_suffix = f":{owner_id}" if owner_id is not None else ""
+
     # 2 РЯД: Список ролей + Обновить
     buttons.append([
-        InlineKeyboardButton(text="📋 Список ролей", callback_data=f"cb:list:{chat_id}"),
-        InlineKeyboardButton(text="🔄 Обновить", callback_data=f"cb:menu:{chat_id}")
+        InlineKeyboardButton(text="📋 Список ролей", callback_data=f"cb:list:{chat_id}{owner_suffix}"),
+        InlineKeyboardButton(text="🔄 Обновить", callback_data=f"cb:menu:{chat_id}{owner_suffix}")
     ])
     
-    # 3 РЯД: Компактная Справка
-    buttons.append([
-        InlineKeyboardButton(text="❓ Справка и Команды", callback_data="cb:help_unified")
-    ])
+    # 3 РЯД: Справка + (если группа) Открыть в ЛС
+    row_3 = [
+        InlineKeyboardButton(text="❓ Справка", callback_data=f"cb:help:{chat_id}{owner_suffix}")
+    ]
+    if not is_private:
+        username = bot_username or "tegerrbot"
+        row_3.append(InlineKeyboardButton(text="📩 Меню в ЛС", url=f"https://t.me/{username}?start=menu_{chat_id}"))
+    buttons.append(row_3)
+
+    # 4 РЯД: Закрыть меню (для поддержания чистоты чата)
+    if not is_private:
+        buttons.append([
+            InlineKeyboardButton(text="❌ Закрыть меню", callback_data=f"cb:close:{chat_id}{owner_suffix}")
+        ])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def get_back_keyboard(chat_id: int, is_private: bool = False) -> InlineKeyboardMarkup:
+def get_back_keyboard(chat_id: int, is_private: bool = False, owner_id: int | None = None, bot_username: str | None = None) -> InlineKeyboardMarkup:
     """Кнопка возврата в главное меню."""
     webapp_url = os.getenv("WEBAPP_URL")
     buttons = []
@@ -263,19 +312,19 @@ def get_back_keyboard(chat_id: int, is_private: bool = False) -> InlineKeyboardM
             url = f"{webapp_url}?chat_id={chat_id}"
             btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", web_app=WebAppInfo(url=url))
         else:
-            tg_app_link = f"https://t.me/tegerrbot?startapp={chat_id}"
+            username = bot_username or "tegerrbot"
+            tg_app_link = f"https://t.me/{username}?startapp={chat_id}"
             btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", url=tg_app_link)
         buttons.append([btn])
-    buttons.append([
-        InlineKeyboardButton(text="⬅️ Назад в меню", callback_data=f"cb:menu:{chat_id}")
-    ])
+
+    owner_suffix = f":{owner_id}" if owner_id is not None else ""
+    back_row = [
+        InlineKeyboardButton(text="⬅️ Назад в меню", callback_data=f"cb:menu:{chat_id}{owner_suffix}")
+    ]
+    if not is_private:
+        back_row.append(InlineKeyboardButton(text="❌ Закрыть", callback_data=f"cb:close:{chat_id}{owner_suffix}"))
+    buttons.append(back_row)
     return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
-
-
-
-
 
 
 def escape_md(text: str | int | None) -> str:
@@ -296,7 +345,7 @@ def format_user_mention(user_id: int, username: str) -> str:
 
 async def is_group(message: Message) -> bool:
     if message.chat.type == ChatType.PRIVATE:
-        await message.reply("⚡ Эта команда работает только в <b>группах</b>!", parse_mode=ParseMode.HTML)
+        await reply_temp(message, "⚡ Эта команда работает только в <b>группах</b>!", delay=TIMEOUT_WARNING)
         return False
     return True
 
@@ -310,15 +359,20 @@ async def check_admin(bot: Bot, message: Message) -> bool:
     _admin_cache[key] = result
     return result
 
-async def build_menu_text(chat_id: int) -> str:
+async def build_menu_text(chat_id: int, target_user: User | None = None) -> str:
     roles = await db.get_all_roles(chat_id)
     total_members = 0
     for r in roles:
         members = await db.get_role_members(chat_id, r)
         total_members += len(members)
 
+    user_str = ""
+    if target_user:
+        uname = f"@{target_user.username}" if target_user.username else target_user.first_name
+        user_str = f" (для {format_user_mention(target_user.id, uname)})"
+
     return (
-        "<b>Управление Ролями</b>\n"
+        f"<b>Управление Ролями</b>{user_str}\n"
         "────────────────────────\n"
         "<blockquote>📊 <b>Статистика группы:</b>\n"
         f"• Активных ролей: <b>{len(roles)}</b>\n"
@@ -331,6 +385,33 @@ async def start_cmd(message: Message, command: CommandObject):
     chat_id = message.chat.id
     is_priv = (message.chat.type == ChatType.PRIVATE)
     
+    if command.args and command.args.startswith("menu_"):
+        try:
+            target_chat_id = int(command.args[5:])
+            roles = await db.get_all_roles(target_chat_id)
+            total_members = 0
+            for r in roles:
+                members = await db.get_role_members(target_chat_id, r)
+                total_members += len(members)
+
+            bot_info = await message.bot.get_me()
+            html_text = await build_menu_text(target_chat_id, target_user=message.from_user)
+            keyboard = get_main_menu_keyboard(
+                target_chat_id,
+                is_private=True,
+                owner_id=message.from_user.id,
+                bot_username=bot_info.username
+            )
+            rich_blocks = [
+                {"type": "heading", "text": "🛡️ Управление Ролями (ЛС)", "size": 2},
+                {"type": "paragraph", "text": f"📊 Статистика группы:\n• Активных ролей: {len(roles)}\n• Участников: {total_members}"},
+                {"type": "footer", "text": "Приватная панель управления группой"}
+            ]
+            await send_smart_message(message.bot, chat_id, html_text, reply_markup=keyboard, rich_blocks=rich_blocks)
+            return
+        except Exception as e:
+            logging.error(f"Error opening menu in PM: {e}")
+
     if command.args and command.args.startswith("join_"):
         role_raw = command.args[5:]
         target_chat_id = chat_id
@@ -364,11 +445,16 @@ async def start_cmd(message: Message, command: CommandObject):
     try:
         total_members = await message.bot.get_chat_member_count(chat_id)
     except Exception:
-        # Fallback if bot is missing privileges, though usually works
         total_members = len(await db.get_all_chat_users(chat_id))
 
-    html_text = await build_menu_text(chat_id)
-    keyboard = get_main_menu_keyboard(chat_id, is_private=is_priv)
+    bot_info = await message.bot.get_me()
+    html_text = await build_menu_text(chat_id, target_user=message.from_user)
+    keyboard = get_main_menu_keyboard(
+        chat_id,
+        is_private=is_priv,
+        owner_id=message.from_user.id if message.from_user else None,
+        bot_username=bot_info.username
+    )
 
     rich_blocks = [
         {
@@ -389,7 +475,18 @@ async def start_cmd(message: Message, command: CommandObject):
     if not is_priv:
         asyncio.create_task(sync_chat_administrators(message.bot, chat_id))
 
-    await send_smart_message(message.bot, chat_id, html_text, reply_markup=keyboard, rich_blocks=rich_blocks)
+    sent_msg = await send_smart_message(
+        message.bot, 
+        chat_id, 
+        html_text, 
+        reply_markup=keyboard, 
+        rich_blocks=rich_blocks,
+        receiver_user_id=message.from_user.id if not is_priv and message.from_user else None
+    )
+    if not is_priv and message.from_user:
+        if sent_msg and hasattr(sent_msg, 'message_id'):
+            await menu_tracker.register_menu(message.bot, chat_id, message.from_user.id, sent_msg.message_id, auto_close_delay=TIMEOUT_MENU)
+        asyncio.create_task(_safe_delete_message(message.bot, chat_id, message.message_id))
 
 
 @router.message(Command("help"))
@@ -397,6 +494,9 @@ async def start_cmd(message: Message, command: CommandObject):
 async def help_cmd(message: Message):
     chat_id = message.chat.id
     is_priv = (message.chat.type == ChatType.PRIVATE)
+    user = message.from_user
+    owner_id = user.id if user else None
+
     if not is_priv:
         asyncio.create_task(sync_chat_administrators(message.bot, chat_id))
     roles = await db.get_all_roles(chat_id)
@@ -405,13 +505,20 @@ async def help_cmd(message: Message):
         members = await db.get_role_members(chat_id, r)
         total_members += len(members)
 
-    html_text = await build_menu_text(chat_id)
-    keyboard = get_main_menu_keyboard(chat_id, is_private=is_priv)
+    bot_info = await message.bot.get_me()
+    html_text = await build_menu_text(chat_id, target_user=user)
+    keyboard = get_main_menu_keyboard(
+        chat_id,
+        is_private=is_priv,
+        owner_id=owner_id,
+        bot_username=bot_info.username
+    )
 
+    user_title = f" (для @{user.username})" if user and user.username else ""
     rich_blocks = [
         {
             "type": "heading",
-            "text": "🛡️ Управление Ролями",
+            "text": f"🛡️ Управление Ролями{user_title}",
             "size": 2
         },
         {
@@ -424,7 +531,18 @@ async def help_cmd(message: Message):
         }
     ]
 
-    await send_smart_message(message.bot, chat_id, html_text, reply_markup=keyboard, rich_blocks=rich_blocks)
+    sent_msg = await send_smart_message(
+        message.bot, 
+        chat_id, 
+        html_text, 
+        reply_markup=keyboard, 
+        rich_blocks=rich_blocks,
+        receiver_user_id=owner_id if not is_priv else None
+    )
+    if not is_priv and owner_id:
+        if sent_msg and hasattr(sent_msg, 'message_id'):
+            await menu_tracker.register_menu(message.bot, chat_id, owner_id, sent_msg.message_id, auto_close_delay=TIMEOUT_MENU)
+        asyncio.create_task(_safe_delete_message(message.bot, chat_id, message.message_id))
 
 async def build_roles_rich_blocks(chat_id: int, roles_data: list) -> list:
     if not roles_data:
@@ -459,18 +577,45 @@ async def safe_answer(query: CallbackQuery, text: str | None = None):
     except Exception:
         pass
 
+async def check_menu_access(query: CallbackQuery, owner_id: int | None) -> bool:
+    """
+    Проверяет, что меню использует именно тот человек, который его запросил.
+    Если нажимает другой пользователь в группе, выдает модальное окно Telegram (show_alert=True),
+    которое видит ТОЛЬКО этот человек.
+    """
+    if query.message.chat.type == ChatType.PRIVATE:
+        return True
+    if owner_id is not None and query.from_user.id != owner_id:
+        await query.answer(
+            "⛔ Это меню открыто для другого пользователя!\n"
+            "Напишите /menu в чате, чтобы открыть своё меню.",
+            show_alert=True
+        )
+        return False
+    return True
+
 @router.callback_query(F.data.startswith("cb:menu:"))
 async def cb_menu(query: CallbackQuery):
-    chat_id = int(query.data.split(":")[2])
-    text = await build_menu_text(chat_id)
-    keyboard = get_main_menu_keyboard(chat_id)
+    parts = query.data.split(":")
+    chat_id = int(parts[2])
+    owner_id = int(parts[3]) if len(parts) > 3 and (parts[3].isdigit() or (parts[3].startswith("-") and parts[3][1:].isdigit())) else None
+
+    if not await check_menu_access(query, owner_id):
+        return
+
+    is_priv = (query.message.chat.type == ChatType.PRIVATE)
+    bot_info = await query.bot.get_me()
+    text = await build_menu_text(chat_id, target_user=query.from_user)
+    keyboard = get_main_menu_keyboard(chat_id, is_private=is_priv, owner_id=owner_id, bot_username=bot_info.username)
     roles = await db.get_all_roles(chat_id)
     total_members = 0
     for r in roles:
         members = await db.get_role_members(chat_id, r)
         total_members += len(members)
+
+    user_title = f" (для @{query.from_user.username})" if query.from_user and query.from_user.username else ""
     rich_blocks = [
-        {"type": "heading", "text": "🛡️ Управление Ролями", "size": 2},
+        {"type": "heading", "text": f"🛡️ Управление Ролями{user_title}", "size": 2},
         {"type": "paragraph", "text": f"📊 Статистика группы:\n• Активных ролей: {len(roles)}\n• Участников: {total_members}"},
         {"type": "footer", "text": "Используйте панель управления ниже или откройте Mini App"}
     ]
@@ -482,18 +627,23 @@ async def cb_menu(query: CallbackQuery):
 
 @router.callback_query(F.data.startswith("cb:list:"))
 async def cb_list(query: CallbackQuery):
-    chat_id = int(query.data.split(":")[2])
+    parts = query.data.split(":")
+    chat_id = int(parts[2])
+    owner_id = int(parts[3]) if len(parts) > 3 and (parts[3].isdigit() or (parts[3].startswith("-") and parts[3][1:].isdigit())) else None
+
+    if not await check_menu_access(query, owner_id):
+        return
+
     roles_data = await db.get_all_roles_with_details(chat_id)
     is_priv = (query.message.chat.type == ChatType.PRIVATE)
     rich_blocks = await build_roles_rich_blocks(chat_id, roles_data)
-    keyboard = get_back_keyboard(chat_id, is_private=is_priv)
+    bot_info = await query.bot.get_me()
+    keyboard = get_back_keyboard(chat_id, is_private=is_priv, owner_id=owner_id, bot_username=bot_info.username)
     try:
         await edit_smart_message(query.message.bot, chat_id, query.message.message_id, "", reply_markup=keyboard, rich_blocks=rich_blocks)
     except Exception:
         pass
     await safe_answer(query)
-    await safe_answer(query)
-
 
 @router.callback_query(F.data == "cb:how_join")
 async def cb_how_join(query: CallbackQuery):
@@ -516,10 +666,22 @@ async def cb_how_join(query: CallbackQuery):
     await safe_answer(query)
 
 @router.callback_query(F.data == "cb:help_unified")
+@router.callback_query(F.data.startswith("cb:help:"))
 async def cb_help_unified(query: CallbackQuery):
     chat_id = query.message.chat.id
+    owner_id = None
+    if query.data.startswith("cb:help:"):
+        parts = query.data.split(":")
+        chat_id = int(parts[2])
+        if len(parts) > 3 and (parts[3].isdigit() or (parts[3].startswith("-") and parts[3][1:].isdigit())):
+            owner_id = int(parts[3])
+
+    if not await check_menu_access(query, owner_id):
+        return
+
     is_priv = (query.message.chat.type == ChatType.PRIVATE)
-    bot_user = html.escape((await query.bot.get_me()).username)
+    bot_info = await query.bot.get_me()
+    bot_user = html.escape(bot_info.username)
     
     rich_blocks = [
         {"type": "heading", "text": "❓ Справка и Команды Бота", "size": 2},
@@ -540,12 +702,24 @@ async def cb_help_unified(query: CallbackQuery):
         {"type": "paragraph", "text": "⚡ Inline-режим:\nВпишите в поле ввода любого чата:"},
         {"type": "pre", "text": f"@{bot_user} dev\n@{bot_user} party"}
     ]
-    keyboard = get_back_keyboard(chat_id, is_private=is_priv)
+    keyboard = get_back_keyboard(chat_id, is_private=is_priv, owner_id=owner_id, bot_username=bot_info.username)
     try:
         await edit_smart_message(query.message.bot, chat_id, query.message.message_id, "", reply_markup=keyboard, rich_blocks=rich_blocks)
     except Exception:
         pass
     await safe_answer(query)
+
+@router.callback_query(F.data.startswith("cb:close:"))
+async def cb_close(query: CallbackQuery):
+    parts = query.data.split(":")
+    chat_id = int(parts[2])
+    owner_id = int(parts[3]) if len(parts) > 3 and (parts[3].isdigit() or (parts[3].startswith("-") and parts[3][1:].isdigit())) else None
+
+    if not await check_menu_access(query, owner_id):
+        return
+
+    await menu_tracker.close_menu(query.bot, chat_id, query.from_user.id, query.message.message_id)
+    await safe_answer(query, "Меню закрыто")
 
 
 
@@ -675,11 +849,11 @@ async def inline_query_handler(query: InlineQuery):
 async def alias_role(message: Message, command: CommandObject, bot: Bot):
     if not await is_group(message): return
     if not await check_admin(bot, message):
-        await message.reply("👑 Только для администраторов!")
+        await reply_temp(message, "👑 Только для администраторов!", delay=TIMEOUT_WARNING)
         return
 
     if not command.args or len(command.args.split()) < 2:
-        await message.reply("💡 Использование: <code>/alias &lt;роль&gt; &lt;алиас&gt;</code>\nНапример: <code>/alias minecraft майн</code>", parse_mode=ParseMode.HTML)
+        await reply_temp(message, "💡 Использование: <code>/alias &lt;роль&gt; &lt;алиас&gt;</code>\nНапример: <code>/alias minecraft майн</code>", delay=TIMEOUT_USAGE)
         return
 
     parts = command.args.split(maxsplit=1)
@@ -689,66 +863,73 @@ async def alias_role(message: Message, command: CommandObject, bot: Bot):
 
     res = await db.add_role_alias(chat_id, role_name, alias_name)
     if res == "success":
-        await message.reply(f"✅ Алиас <b>{html.escape(alias_name)}</b> успешно привязан к роли <b>{html.escape(role_name)}</b>.", parse_mode=ParseMode.HTML)
+        await reply_temp(message, f"✅ Алиас <b>{html.escape(alias_name)}</b> успешно привязан к роли <b>{html.escape(role_name)}</b>.", delay=TIMEOUT_SUCCESS)
     elif res == "exists":
-        await message.reply(f"⚠️ Алиас <b>{html.escape(alias_name)}</b> уже существует в этом чате.", parse_mode=ParseMode.HTML)
+        await reply_temp(message, f"⚠️ Алиас <b>{html.escape(alias_name)}</b> уже существует в этом чате.", delay=TIMEOUT_WARNING)
     elif res == "not_found":
-        await message.reply(f"❌ Роли <b>{html.escape(role_name)}</b> не найдено.", parse_mode=ParseMode.HTML)
+        await reply_temp(message, f"❌ Роли <b>{html.escape(role_name)}</b> не найдено.", delay=TIMEOUT_WARNING)
 
 @router.message(Command("unalias"))
 async def unalias_role(message: Message, command: CommandObject, bot: Bot):
     if not await is_group(message): return
     if not await check_admin(bot, message):
-        await message.reply("👑 Только для администраторов!")
+        await reply_temp(message, "👑 Только для администраторов!", delay=TIMEOUT_WARNING)
         return
 
     if not command.args:
-        await message.reply("💡 Использование: <code>/unalias &lt;алиас&gt;</code>", parse_mode=ParseMode.HTML)
+        await reply_temp(message, "💡 Использование: <code>/unalias &lt;алиас&gt;</code>", delay=TIMEOUT_USAGE)
         return
 
     alias_name = command.args.split()[0]
     chat_id = message.chat.id
 
     if await db.remove_role_alias(chat_id, alias_name):
-        await message.reply(f"🗑 Алиас <b>{html.escape(alias_name)}</b> успешно удален.", parse_mode=ParseMode.HTML)
+        await reply_temp(message, f"🗑 Алиас <b>{html.escape(alias_name)}</b> успешно удален.", delay=TIMEOUT_SUCCESS)
     else:
-        await message.reply(f"❓ Алиас <b>{html.escape(alias_name)}</b> не найден.", parse_mode=ParseMode.HTML)
+        await reply_temp(message, f"❓ Алиас <b>{html.escape(alias_name)}</b> не найден.", delay=TIMEOUT_WARNING)
 
 @router.message(Command("create"))
 async def create_role(message: Message, command: CommandObject, bot: Bot):
     if not await is_group(message): return
     if not await check_admin(bot, message):
-        await message.reply("👑 Только для администраторов!")
+        await reply_temp(message, "👑 Только для администраторов!", delay=TIMEOUT_WARNING)
         return
 
     if not command.args:
-        await message.reply("💡 Использование: <code>/create &lt;название&gt;</code>", parse_mode=ParseMode.HTML)
+        await reply_temp(message, "💡 Использование: <code>/create &lt;название&gt;</code>", delay=TIMEOUT_USAGE)
         return
 
     role_name = command.args.split()[0]
     chat_id = message.chat.id
 
     if await db.create_role(chat_id, role_name):
-        keyboard = get_main_menu_keyboard(chat_id)
-        await message.reply(
+        bot_info = await bot.get_me()
+        keyboard = get_main_menu_keyboard(
+            chat_id,
+            is_private=False,
+            owner_id=message.from_user.id if message.from_user else None,
+            bot_username=bot_info.username
+        )
+        await reply_temp(
+            message,
             f"✅ Роль 🛡️ <b>{html.escape(role_name)}</b> успешно создана!", 
-            parse_mode=ParseMode.HTML, 
+            delay=TIMEOUT_SUCCESS,
             reply_markup=keyboard
         )
         # Ачивка: создатель ролей
         await try_unlock_achievement(bot, chat_id, message.from_user.id, "sheriff")
     else:
-        await message.reply(f"⚠️ Роль <b>{html.escape(role_name)}</b> уже существует.", parse_mode=ParseMode.HTML)
+        await reply_temp(message, f"⚠️ Роль <b>{html.escape(role_name)}</b> уже существует.", delay=TIMEOUT_WARNING)
 
 @router.message(Command("delete"))
 async def delete_role(message: Message, command: CommandObject, bot: Bot):
     if not await is_group(message): return
     if not await check_admin(bot, message):
-        await message.reply("👑 Только для администраторов!")
+        await reply_temp(message, "👑 Только для администраторов!", delay=TIMEOUT_WARNING)
         return
 
     if not command.args:
-        await message.reply("💡 Использование: <code>/delete &lt;название&gt;</code>", parse_mode=ParseMode.HTML)
+        await reply_temp(message, "💡 Использование: <code>/delete &lt;название&gt;</code>", delay=TIMEOUT_USAGE)
         return
 
     raw_name = command.args.split()[0]
@@ -756,16 +937,16 @@ async def delete_role(message: Message, command: CommandObject, bot: Bot):
     role_name = await db.resolve_role_name(chat_id, raw_name)
 
     if await db.delete_role(chat_id, role_name):
-        await message.reply(f"🗑 Роль <b>{html.escape(role_name)}</b> удалена.", parse_mode=ParseMode.HTML)
+        await reply_temp(message, f"🗑 Роль <b>{html.escape(role_name)}</b> удалена.", delay=TIMEOUT_SUCCESS)
     else:
-        await message.reply(f"❓ Роли <b>{html.escape(role_name)}</b> не найдено.", parse_mode=ParseMode.HTML)
+        await reply_temp(message, f"❓ Роли <b>{html.escape(role_name)}</b> не найдено.", delay=TIMEOUT_WARNING)
 
 @router.message(Command("join"))
 async def join_role(message: Message, command: CommandObject):
     if not await is_group(message): return
 
     if not command.args:
-        await message.reply("💡 Использование: <code>/join &lt;название&gt;</code>", parse_mode=ParseMode.HTML)
+        await reply_temp(message, "💡 Использование: <code>/join &lt;название&gt;</code>", delay=TIMEOUT_USAGE)
         return
 
     raw_name = command.args.split()[0]
@@ -777,7 +958,7 @@ async def join_role(message: Message, command: CommandObject):
     result = await db.join_role(chat_id, role_name, user.id, username)
 
     if result == "success":
-        await message.reply(f"🎉 Вы вступили в роль 🛡️ <b>{html.escape(role_name)}</b>!", parse_mode=ParseMode.HTML)
+        await reply_temp(message, f"🎉 Вы вступили в роль 🛡️ <b>{html.escape(role_name)}</b>!", delay=TIMEOUT_SUCCESS)
         # Ачивки за вступление в роль
         bot_obj = message.bot
         await try_unlock_achievement(bot_obj, chat_id, user.id, "first_join")
@@ -796,16 +977,16 @@ async def join_role(message: Message, command: CommandObject):
         if 0 <= hour < 6:
             await try_unlock_achievement(bot_obj, chat_id, user.id, "night_shift")
     elif result == "already_in":
-        await message.reply(f"ℹ️ Вы уже состоите в роли <b>{html.escape(role_name)}</b>.", parse_mode=ParseMode.HTML)
+        await reply_temp(message, f"ℹ️ Вы уже состоите в роли <b>{html.escape(role_name)}</b>.", delay=TIMEOUT_WARNING)
     elif result == "not_found":
-        await message.reply(f"❌ Роли <b>{html.escape(role_name)}</b> не найдено.", parse_mode=ParseMode.HTML)
+        await reply_temp(message, f"❌ Роли <b>{html.escape(role_name)}</b> не найдено.", delay=TIMEOUT_WARNING)
 
 @router.message(Command("leave"))
 async def leave_role(message: Message, command: CommandObject):
     if not await is_group(message): return
 
     if not command.args:
-        await message.reply("💡 Использование: <code>/leave &lt;название&gt;</code>", parse_mode=ParseMode.HTML)
+        await reply_temp(message, "💡 Использование: <code>/leave &lt;название&gt;</code>", delay=TIMEOUT_USAGE)
         return
 
     raw_name = command.args.split()[0]
@@ -813,9 +994,9 @@ async def leave_role(message: Message, command: CommandObject):
     role_name = await db.resolve_role_name(chat_id, raw_name)
 
     if await db.leave_role(chat_id, role_name, message.from_user.id):
-        await message.reply(f"👋 Вы покинули роль <b>{html.escape(role_name)}</b>.", parse_mode=ParseMode.HTML)
+        await reply_temp(message, f"👋 Вы покинули роль <b>{html.escape(role_name)}</b>.", delay=TIMEOUT_SUCCESS)
     else:
-        await message.reply(f"ℹ️ Вы не состоите в роли <b>{html.escape(role_name)}</b>.", parse_mode=ParseMode.HTML)
+        await reply_temp(message, f"ℹ️ Вы не состоите в роли <b>{html.escape(role_name)}</b>.", delay=TIMEOUT_WARNING)
 
 @router.message(Command("list"))
 async def list_roles(message: Message):
@@ -823,10 +1004,27 @@ async def list_roles(message: Message):
 
     chat_id = message.chat.id
     roles_data = await db.get_all_roles_with_details(chat_id)
-    keyboard = get_main_menu_keyboard(chat_id)
+    bot_info = await message.bot.get_me()
+    keyboard = get_main_menu_keyboard(
+        chat_id,
+        is_private=False,
+        owner_id=message.from_user.id if message.from_user else None,
+        bot_username=bot_info.username
+    )
 
     rich_blocks = await build_roles_rich_blocks(chat_id, roles_data)
-    await send_smart_message(message.bot, chat_id, "", reply_markup=keyboard, rich_blocks=rich_blocks)
+    sent_msg = await send_smart_message(
+        message.bot, 
+        chat_id, 
+        "📋 <b>Список ролей</b>", 
+        reply_markup=keyboard, 
+        rich_blocks=rich_blocks,
+        receiver_user_id=message.from_user.id if message.from_user else None
+    )
+    if message.from_user:
+        if sent_msg and hasattr(sent_msg, 'message_id'):
+            await menu_tracker.register_menu(message.bot, chat_id, message.from_user.id, sent_msg.message_id, auto_close_delay=TIMEOUT_MENU)
+        asyncio.create_task(_safe_delete_message(message.bot, chat_id, message.message_id))
 
 
 @router.message(Command("send"))
@@ -841,16 +1039,17 @@ async def send_custom_msg(message: Message, command: CommandObject, bot: Bot):
 
     if not is_owner:
         if message.chat.type == ChatType.PRIVATE or not await check_admin(bot, message):
-            await message.reply(
+            await reply_temp(
+                message,
                 f"⛔ У вас нет доступа к этой команде.\n\n"
                 f"💡 <b>Ваш User ID:</b> <code>{message.from_user.id}</code>\n"
                 f"💡 <b>OWNER_ID в .env:</b> <code>{owner_id_env or 'не задан'}</code>",
-                parse_mode=ParseMode.HTML
+                delay=TIMEOUT_WARNING
             )
             return
 
     if not command.args or len(command.args.split()) < 2:
-        await message.reply("💡 Использование: <code>/send &lt;chat_id&gt; &lt;текст сообщения&gt;</code>", parse_mode=ParseMode.HTML)
+        await reply_temp(message, "💡 Использование: <code>/send &lt;chat_id&gt; &lt;текст сообщения&gt;</code>", delay=TIMEOUT_USAGE)
         return
 
     parts = command.args.split(maxsplit=1)
@@ -859,19 +1058,19 @@ async def send_custom_msg(message: Message, command: CommandObject, bot: Bot):
 
     try:
         await bot.send_message(chat_id=target_chat_id, text=msg_text, parse_mode=ParseMode.HTML)
-        await message.reply(f"✅ Сообщение успешно отправлено в <code>{target_chat_id}</code>!", parse_mode=ParseMode.HTML)
+        await reply_temp(message, f"✅ Сообщение успешно отправлено в <code>{target_chat_id}</code>!", delay=TIMEOUT_SUCCESS)
     except Exception as e:
-        await message.reply(f"❌ Ошибка отправки: <code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML)
+        await reply_temp(message, f"❌ Ошибка отправки: <code>{html.escape(str(e))}</code>", delay=TIMEOUT_WARNING)
 
 @router.message(Command("notify"))
 async def notify_role(message: Message, command: CommandObject, bot: Bot):
     if not await is_group(message): return
     if not await check_admin(bot, message):
-        await message.reply("👑 Только для администраторов!")
+        await reply_temp(message, "👑 Только для администраторов!", delay=TIMEOUT_WARNING)
         return
 
     if not command.args or len(command.args.split()) < 2:
-        await message.reply("💡 Использование: <code>/notify &lt;роль&gt; &lt;текст уведомления&gt;</code>", parse_mode=ParseMode.HTML)
+        await reply_temp(message, "💡 Использование: <code>/notify &lt;роль&gt; &lt;текст уведомления&gt;</code>", delay=TIMEOUT_USAGE)
         return
 
     parts = command.args.split(maxsplit=1)
@@ -884,7 +1083,7 @@ async def notify_role(message: Message, command: CommandObject, bot: Bot):
     members = await db.get_role_members(chat_id, role_name)
 
     if not members:
-        await message.reply(f"❌ В роли {emoji} <b>{html.escape(role_name)}</b> пока нет участников или она не существует.", parse_mode=ParseMode.HTML)
+        await reply_temp(message, f"❌ В роли {emoji} <b>{html.escape(role_name)}</b> пока нет участников или она не существует.", delay=TIMEOUT_WARNING)
         return
 
     mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
@@ -904,15 +1103,16 @@ async def notify_role(message: Message, command: CommandObject, bot: Bot):
 async def add_to_role(message: Message, command: CommandObject, bot: Bot):
     if not await is_group(message): return
     if not await check_admin(bot, message):
-        await message.reply("👑 Только для администраторов!")
+        await reply_temp(message, "👑 Только для администраторов!", delay=TIMEOUT_WARNING)
         return
 
     if not command.args:
-        await message.reply(
+        await reply_temp(
+            message,
             "💡 <b>Способы добавления в роль:</b>\n"
             "• <code>/add &lt;роль&gt; @username</code> (можно несколько через пробел)\n"
             "• Ответом на сообщение человека: <code>/add &lt;роль&gt;</code>", 
-            parse_mode=ParseMode.HTML
+            delay=TIMEOUT_USAGE
         )
         return
 
@@ -936,7 +1136,7 @@ async def add_to_role(message: Message, command: CommandObject, bot: Bot):
             elif res == "already_in":
                 already.append(html.escape(clean_un))
             elif res == "not_found":
-                await message.reply(f"❌ Роли <b>{html.escape(role_name)}</b> не найдено.", parse_mode=ParseMode.HTML)
+                await reply_temp(message, f"❌ Роли <b>{html.escape(role_name)}</b> не найдено.", delay=TIMEOUT_WARNING)
                 return
 
         msg_parts = []
@@ -944,7 +1144,7 @@ async def add_to_role(message: Message, command: CommandObject, bot: Bot):
             msg_parts.append(f"✅ Добавлены в <b>{html.escape(role_name)}</b>: {', '.join(added)}")
         if already:
             msg_parts.append(f"ℹ️ Уже в роли: {', '.join(already)}")
-        await message.reply("\n".join(msg_parts), parse_mode=ParseMode.HTML)
+        await reply_temp(message, "\n".join(msg_parts), delay=TIMEOUT_SUCCESS)
         return
 
     if message.reply_to_message:
@@ -955,23 +1155,24 @@ async def add_to_role(message: Message, command: CommandObject, bot: Bot):
 
         if result == "success":
             await db.add_audit_log(chat_id, message.from_user.id, sender_un, "Добавление в роль", f"{clean_username} -> {role_name}")
-            await message.reply(f"✅ Пользователь {user_mention} добавлен в роль <b>{html.escape(role_name)}</b>!", parse_mode=ParseMode.HTML)
+            await reply_temp(message, f"✅ Пользователь {user_mention} добавлен в роль <b>{html.escape(role_name)}</b>!", delay=TIMEOUT_SUCCESS)
         elif result == "already_in":
-            await message.reply(f"ℹ️ Пользователь {user_mention} уже состоит в этой роли.", parse_mode=ParseMode.HTML)
+            await reply_temp(message, f"ℹ️ Пользователь {user_mention} уже состоит в этой роли.", delay=TIMEOUT_WARNING)
         elif result == "not_found":
-            await message.reply(f"❌ Роли <b>{html.escape(role_name)}</b> не найдено.", parse_mode=ParseMode.HTML)
+            await reply_temp(message, f"❌ Роли <b>{html.escape(role_name)}</b> не найдено.", delay=TIMEOUT_WARNING)
         return
 
-    await message.reply(
+    await reply_temp(
+        message,
         "💡 Укажите юзернейм через @ или ответьте на сообщение:\n<code>/add &lt;роль&gt; @username</code>", 
-        parse_mode=ParseMode.HTML
+        delay=TIMEOUT_USAGE
     )
 
 @router.message(Command("sync"))
 async def cmd_sync(message: Message, bot: Bot):
     if not await is_group(message): return
     if not await check_admin(bot, message):
-        await message.reply("⛔ Эта команда доступна только <b>администраторам</b> группы.", parse_mode=ParseMode.HTML)
+        await reply_temp(message, "⛔ Эта команда доступна только <b>администраторам</b> группы.", delay=TIMEOUT_WARNING)
         return
 
     status_msg = await message.reply("🔄 Синхронизирую администраторов и участников группы...")
@@ -985,6 +1186,8 @@ async def cmd_sync(message: Message, bot: Bot):
         f"💡 <i>Новые участники при входе или открытии Mini App добавляются автоматически.</i>",
         parse_mode=ParseMode.HTML
     )
+    asyncio.create_task(_safe_delete_message(bot, message.chat.id, message.message_id))
+    schedule_delete(bot, message.chat.id, status_msg.message_id, delay_seconds=TIMEOUT_SYNC)
 
 @router.message(Command("all"))
 @router.message(Command("everyone"))
@@ -1004,7 +1207,7 @@ async def call_all_members(message: Message, bot: Bot):
         members = await db.get_all_chat_users(chat_id)
 
     if not members:
-        await message.reply("👥 В группе пока нет зарегистрированных участников.\nИспользуйте /sync для подтягивания админов.")
+        await reply_temp(message, "👥 В группе пока нет зарегистрированных участников.\nИспользуйте /sync для подтягивания админов.", delay=TIMEOUT_WARNING)
         return
 
     if len(members) <= 12:
@@ -1157,6 +1360,8 @@ async def create_party_cmd(message: Message, command: CommandObject):
 
     msg = await send_smart_message(message.bot, message.chat.id, text, reply_markup=kb, rich_blocks=blocks)
     await db.set_party_message_id(party_id, msg.message_id)
+    # Мгновенно удаляем команду пользователя из группы
+    asyncio.create_task(_safe_delete_message(message.bot, message.chat.id, message.message_id))
 
     # Ачивка за первый стак
     await db.unlock_achievement(message.chat.id, user.id, "party_starter")
@@ -1165,11 +1370,11 @@ async def create_party_cmd(message: Message, command: CommandObject):
 async def change_party_title_cmd(message: Message, command: CommandObject, bot: Bot):
     if not await is_group(message): return
     if not command.args:
-        await message.reply("💡 Использование: ответом на карточку сбора укажите <code>/party_title Новое название</code>", parse_mode=ParseMode.HTML)
+        await reply_temp(message, "💡 Использование: ответом на карточку сбора укажите <code>/party_title Новое название</code>", delay=TIMEOUT_USAGE)
         return
 
     if not message.reply_to_message:
-        await message.reply("⚠️ Отправьте эту команду ответом на карточку сбора пати!", parse_mode=ParseMode.HTML)
+        await reply_temp(message, "⚠️ Отправьте эту команду ответом на карточку сбора пати!", delay=TIMEOUT_WARNING)
         return
 
     reply_msg_id = message.reply_to_message.message_id
@@ -1178,7 +1383,7 @@ async def change_party_title_cmd(message: Message, command: CommandObject, bot: 
         p = await cursor.fetchone()
 
     if not p:
-        await message.reply("❌ Сбор не найден или уже завершен.")
+        await reply_temp(message, "❌ Сбор не найден или уже завершен.", delay=TIMEOUT_WARNING)
         return
 
     party_id, creator_id = p[0], p[1]
@@ -1186,7 +1391,7 @@ async def change_party_title_cmd(message: Message, command: CommandObject, bot: 
     is_admin = await check_admin(bot, message)
 
     if not is_creator and not is_admin:
-        await message.reply("⛔ Изменить название может только организатор сбора!")
+        await reply_temp(message, "⛔ Изменить название может только организатор сбора!", delay=TIMEOUT_WARNING)
         return
 
     new_title = command.args.strip()
@@ -1195,9 +1400,9 @@ async def change_party_title_cmd(message: Message, command: CommandObject, bot: 
         text, kb = format_party_message(updated_party)
         try:
             await bot.edit_message_text(text, chat_id=message.chat.id, message_id=reply_msg_id, parse_mode=ParseMode.HTML, reply_markup=kb)
-            await message.reply(f"✅ Название сбора успешно изменено на «{html.escape(new_title)}»!", parse_mode=ParseMode.HTML)
+            await reply_temp(message, f"✅ Название сбора успешно изменено на «{html.escape(new_title)}»!", delay=TIMEOUT_SUCCESS)
         except Exception:
-            await message.reply(f"✅ Название изменено на «{html.escape(new_title)}»!", parse_mode=ParseMode.HTML)
+            await reply_temp(message, f"✅ Название изменено на «{html.escape(new_title)}»!", delay=TIMEOUT_SUCCESS)
 
 @router.callback_query(F.data.startswith("pty:"))
 async def handle_party_callback(callback: CallbackQuery, bot: Bot):
@@ -1234,6 +1439,10 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
             blocks, completion_text, _ = format_party_message(party_data)
             try:
                 await send_smart_message(callback.message.bot, callback.message.chat.id, completion_text, rich_blocks=blocks)
+                # Удаляем интерактивную карточку набора, так как пати полностью собрана
+                if callback.message:
+                    asyncio.create_task(_safe_delete_message(callback.bot, callback.message.chat.id, callback.message.message_id))
+                return
             except Exception as ex:
                 logging.warning(f"Failed to send completion reply: {ex}")
 
@@ -1255,6 +1464,10 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
 
         _, party_data = await db.cancel_party(party_id, user.id)
         await callback.answer("Сбор отменен.")
+        # Мгновенно удаляем карточку отмененного сбора, не засоряя чат
+        if callback.message:
+            asyncio.create_task(_safe_delete_message(callback.bot, callback.message.chat.id, callback.message.message_id))
+        return
 
     elif action == "settings":
         if not is_creator and not is_admin:
@@ -1458,10 +1671,10 @@ async def process_respect_give(message: Message, target_user: User):
     status, value, (badge, title) = await db.give_respect(chat_id, from_user.id, target_user.id, target_un)
 
     if status == "self":
-        await message.reply("😄 Сам себе респект не выпишешь!")
+        await reply_temp(message, "😄 Сам себе респект не выпишешь!", delay=TIMEOUT_WARNING)
     elif status == "cooldown":
         mins = max(1, (value + 59) // 60)
-        await message.reply(f"⏳ Вы уже давали респект {html.escape(target_un)} недавно. Подождите ещё ~{mins} мин.", parse_mode=ParseMode.HTML)
+        await reply_temp(message, f"⏳ Вы уже давали респект {html.escape(target_un)} недавно. Подождите ещё ~{mins} мин.", delay=TIMEOUT_WARNING)
     elif status == "success":
         from_un = f"@{from_user.username}" if from_user.username else from_user.first_name
         badge_str = f"{badge} " if badge else ""
@@ -1485,7 +1698,7 @@ async def process_respect_give(message: Message, target_user: User):
 @router.message(Command("top", "rep", "respect"))
 async def respect_top_cmd(message: Message, command: CommandObject):
     if message.chat.type == ChatType.PRIVATE:
-        await message.reply("📋 Топ респекта доступен в группах!")
+        await reply_temp(message, "📋 Топ респекта доступен в группах!", delay=TIMEOUT_WARNING)
         return
 
     # Если команду вызвали в ответ на чье-то сообщение: /rep -> дать респект
