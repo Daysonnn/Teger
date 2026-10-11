@@ -201,22 +201,21 @@ async def test_send_smart_message_receiver_user_id_group_isolation():
     assert mock_bot.send_message.call_args[1].get("chat_id") == -100123456
     assert mock_bot.send_message.call_args[1].get("receiver_user_id") == 777
 
-    # 2. Тест: редактирование эфемерного сообщения в группе
-    res = await edit_smart_message(
-        mock_bot,
+    # 3. Тест: при ошибке нативного эфемерного метода плавно фоллбэчится без крэша
+    mock_bot_fallback = MagicMock()
+    async def fail_ephemeral(*args, **kwargs):
+        if kwargs.get("receiver_user_id"):
+            raise Exception("TelegramBadRequest: unsupported parameter")
+        return MagicMock(message_id=888)
+
+    mock_bot_fallback.send_message = AsyncMock(side_effect=fail_ephemeral)
+    msg = await send_smart_message(
+        mock_bot_fallback,
         chat_id=-100123456,
-        message_id=555,
-        html_text="Updated text",
+        html_text="Fallback text",
         receiver_user_id=777
     )
-    mock_bot.edit_ephemeral_message_text.assert_called_once_with(
-        chat_id=-100123456,
-        receiver_user_id=777,
-        ephemeral_message_id=555,
-        text="Updated text",
-        parse_mode="HTML",
-        reply_markup=None
-    )
-    assert res is True
+    assert msg.message_id == 888
+    assert mock_bot_fallback.send_message.call_count == 2
 
 

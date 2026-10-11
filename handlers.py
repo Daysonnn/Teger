@@ -176,22 +176,26 @@ async def send_smart_message(
     receiver_user_id: int | None = None
 ) -> Message:
     """
-    Отправляет сообщение в чат. Если указан receiver_user_id, сообщение отправляется
-    в группу как нативное эфемерное сообщение (видно ТОЛЬКО указанному пользователю-отправителю).
+    Отправляет сообщение в чат. Если указан receiver_user_id, сначала пробует отправить
+    нативное эфемерное сообщение (видимое только отправителю). При отсутствии поддержки
+    со стороны Telegram API плавно переключается на стандартную отправку с защитой по owner_id.
     """
     safe_text = html_text if (html_text and html_text.strip()) else "📋 <b>Информация</b>"
 
-    # Если указан receiver_user_id — отправляем В ГРУППУ сообщение, видимое ТОЛЬКО отправителю
+    # 1. Пробуем нативное эфемерное сообщение в группе (видно только receiver_user_id)
     if receiver_user_id:
-        return await bot.send_message(
-            chat_id=chat_id,
-            text=safe_text,
-            parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup,
-            receiver_user_id=receiver_user_id
-        )
+        try:
+            return await bot.send_message(
+                chat_id=chat_id,
+                text=safe_text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup,
+                receiver_user_id=receiver_user_id
+            )
+        except Exception as e:
+            logging.warning(f"Native ephemeral send_message failed ({e}), falling back to standard send")
 
-    # Публичное сообщение (для чата в целом)
+    # 2. Стандартная отправка в чат (защищена по owner_id и auto_close)
     return await bot.send_message(
         chat_id=chat_id,
         text=safe_text,
