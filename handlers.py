@@ -176,78 +176,27 @@ async def send_smart_message(
     receiver_user_id: int | None = None
 ) -> Message:
     """
-    Отправляет сообщение. Если указан receiver_user_id, сообщение гарантированно
-    скрывается от остальных участников группы: сначала пробуется нативное эфемерное сообщение,
-    а при невозможности доставки в группе — отправляется пользователю в ЛС.
+    Отправляет сообщение в чат. Если указан receiver_user_id, сообщение отправляется
+    в группу как нативное эфемерное сообщение (видно ТОЛЬКО указанному пользователю-отправителю).
     """
     safe_text = html_text if (html_text and html_text.strip()) else "📋 <b>Информация</b>"
 
-    # Если запрошено персональное/невидимое для других сообщение в группе:
+    # Если указан receiver_user_id — отправляем В ГРУППУ сообщение, видимое ТОЛЬКО отправителю
     if receiver_user_id:
-        ephemeral_params = {"receiver_user_id": receiver_user_id}
-        reply_params = {"message_id": reply_to_message_id} if reply_to_message_id else None
-
-        # 1. Пробуем отправить нативное эфемерное сообщение в группе (видно ТОЛЬКО receiver_user_id)
-        try:
-            return await bot.send_message(
-                chat_id=chat_id,
-                text=safe_text,
-                parse_mode=ParseMode.HTML,
-                reply_markup=reply_markup,
-                receiver_user_id=receiver_user_id
-            )
-        except Exception as e1:
-            logging.debug(f"bot.send_message with receiver_user_id failed ({e1}), trying SendEphemeralMessage fallback")
-            try:
-                return await bot(SendEphemeralMessage(
-                    chat_id=chat_id,
-                    text=safe_text,
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=reply_markup,
-                    receiver_user_id=receiver_user_id,
-                    ephemeral_message_parameters={"receiver_user_id": receiver_user_id}
-                ))
-            except Exception as e2:
-                logging.warning(f"Native ephemeral message failed in group ({e2}). Falling back to PM to prevent leaking to other members.")
-
-        # 2. Если в группе отправить эфемерно не удалось (нет прав у бота) —
-        # отправляем меню В ЛИЧНЫЕ СООБЩЕНИЯ пользователю, чтобы никто в группе его не увидел!
-        try:
-            bot_info = await bot.get_me()
-            pm_keyboard = get_main_menu_keyboard(
-                chat_id, 
-                is_private=True, 
-                owner_id=receiver_user_id, 
-                bot_username=bot_info.username
-            )
-            return await bot.send_message(
-                chat_id=receiver_user_id,
-                text=safe_text,
-                parse_mode=ParseMode.HTML,
-                reply_markup=pm_keyboard
-            )
-        except Exception as pm_err:
-            logging.warning(f"Failed to send menu to user {receiver_user_id} in PM: {pm_err}")
-            # Пользователь не нажал Start в ЛС. Отправляем в чат короткую ссылку (исчезнет через 4 сек)
-            bot_info = await bot.get_me()
-            temp_kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="📩 Открыть меню в ЛС", url=f"https://t.me/{bot_info.username}?start=menu_{chat_id}")
-            ]])
-            temp_msg = await bot.send_message(
-                chat_id=chat_id,
-                text="🔒 Меню отправлено вам в ЛС. Если диалог не начат — нажмите кнопку:",
-                reply_markup=temp_kb
-            )
-            schedule_delete(bot, chat_id, temp_msg.message_id, delay_seconds=4.0)
-            return temp_msg
+        return await bot.send_message(
+            chat_id=chat_id,
+            text=safe_text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup,
+            receiver_user_id=receiver_user_id
+        )
 
     # Публичное сообщение (для чата в целом)
     return await bot.send_message(
         chat_id=chat_id,
         text=safe_text,
         parse_mode=ParseMode.HTML,
-        reply_markup=reply_markup,
-        reply_to_message_id=reply_to_message_id
+        reply_markup=reply_markup
     )
 
 class EditMessageTextRich(TelegramMethod[Message | bool]):
@@ -269,9 +218,28 @@ async def edit_smart_message(
     message_id: int,
     html_text: str, 
     reply_markup: InlineKeyboardMarkup | None = None, 
-    rich_blocks: list | None = None
+    rich_blocks: list | None = None,
+    receiver_user_id: int | None = None
 ) -> Message | bool:
-    """Редактирует сообщение, используя Rich Message, при ошибке откатывается на HTML."""
+    """Редактирует сообщение, поддерживая нативные эфемерные сообщения и стандартные сообщения."""
+    # 1. Если сообщение эфемерное (передан receiver_user_id), пробуем edit_ephemeral_message_text
+    if receiver_user_id:
+        try:
+            return await bot.edit_ephemeral_message_text(
+                chat_id=chat_id,
+                receiver_user_id=receiver_user_id,
+                ephemeral_message_id=message_id,
+                text=html_text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+        except TelegramBadRequest as e:
+            if "message is not modified" in str(e).lower():
+                return True
+            logging.debug(f"edit_ephemeral_message_text bad request ({e}), falling back to standard edit")
+        except Exception as e:
+            logging.debug(f"edit_ephemeral_message_text failed ({e}), falling back to standard edit")
+
     if rich_blocks:
         try:
             return await bot(EditMessageTextRich(
@@ -662,7 +630,7 @@ async def cb_menu(query: CallbackQuery):
         {"type": "footer", "text": "Используйте панель управления ниже или откройте Mini App"}
     ]
     try:
-        await edit_smart_message(query.message.bot, chat_id, query.message.message_id, text, reply_markup=keyboard, rich_blocks=rich_blocks)
+        await edit_smart_message(query.message.bot, chat_id, query.message.message_id, text, reply_markup=keyboard, rich_blocks=rich_blocks, receiver_user_id=owner_id or query.from_user.id)
     except Exception:
         pass
     await safe_answer(query, "Обновлено")
@@ -682,7 +650,7 @@ async def cb_list(query: CallbackQuery):
     bot_info = await query.bot.get_me()
     keyboard = get_back_keyboard(chat_id, is_private=is_priv, owner_id=owner_id, bot_username=bot_info.username)
     try:
-        await edit_smart_message(query.message.bot, chat_id, query.message.message_id, "", reply_markup=keyboard, rich_blocks=rich_blocks)
+        await edit_smart_message(query.message.bot, chat_id, query.message.message_id, "", reply_markup=keyboard, rich_blocks=rich_blocks, receiver_user_id=owner_id or query.from_user.id)
     except Exception:
         pass
     await safe_answer(query)
@@ -702,7 +670,7 @@ async def cb_how_join(query: CallbackQuery):
     ]
     keyboard = get_back_keyboard(chat_id)
     try:
-        await edit_smart_message(query.message.bot, chat_id, query.message.message_id, "", reply_markup=keyboard, rich_blocks=rich_blocks)
+        await edit_smart_message(query.message.bot, chat_id, query.message.message_id, "", reply_markup=keyboard, rich_blocks=rich_blocks, receiver_user_id=query.from_user.id)
     except Exception:
         pass
     await safe_answer(query)
@@ -715,7 +683,7 @@ async def cb_help_unified(query: CallbackQuery):
     if query.data.startswith("cb:help:"):
         parts = query.data.split(":")
         chat_id = int(parts[2])
-        if len(parts) > 3 and (parts[3].isdigit() or (parts[3].startswith("-") and parts[3][1:].isdigit())):
+        if len(parts) > 3 and (parts[3].isdigit() or (parts[3].startswith("-") and parts[3][1:].isdigit)):
             owner_id = int(parts[3])
 
     if not await check_menu_access(query, owner_id):
@@ -746,7 +714,7 @@ async def cb_help_unified(query: CallbackQuery):
     ]
     keyboard = get_back_keyboard(chat_id, is_private=is_priv, owner_id=owner_id, bot_username=bot_info.username)
     try:
-        await edit_smart_message(query.message.bot, chat_id, query.message.message_id, "", reply_markup=keyboard, rich_blocks=rich_blocks)
+        await edit_smart_message(query.message.bot, chat_id, query.message.message_id, "", reply_markup=keyboard, rich_blocks=rich_blocks, receiver_user_id=owner_id or query.from_user.id)
     except Exception:
         pass
     await safe_answer(query)

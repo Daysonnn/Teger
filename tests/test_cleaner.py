@@ -184,45 +184,39 @@ async def test_setup_commands():
 
 @pytest.mark.asyncio
 async def test_send_smart_message_receiver_user_id_group_isolation():
-    from handlers import send_smart_message
+    from handlers import send_smart_message, edit_smart_message
 
     mock_bot = MagicMock()
-    # 1. Тест: нативная отправка с receiver_user_id
     mock_bot.send_message = AsyncMock(return_value=MagicMock(message_id=555))
+    mock_bot.edit_ephemeral_message_text = AsyncMock(return_value=True)
     
+    # 1. Тест: отправка сообщения В ГРУППУ (chat_id=-100123456), но видимого ТОЛЬКО отправителю (receiver_user_id=777)
     await send_smart_message(
         mock_bot, 
         chat_id=-100123456, 
         html_text="Private text", 
         receiver_user_id=777
     )
-    # Проверяем, что передается receiver_user_id
     mock_bot.send_message.assert_called_once()
+    assert mock_bot.send_message.call_args[1].get("chat_id") == -100123456
     assert mock_bot.send_message.call_args[1].get("receiver_user_id") == 777
 
-    # 2. Тест: если в группе отправка эфемерного не удалась (ошибка прав или формата),
-    # меню ОБЯЗАНО уйти в ЛС (chat_id=receiver_user_id), а НЕ в общий чат (-100123456)
-    mock_bot_fallback = MagicMock()
-    mock_bot_fallback.get_me = AsyncMock(return_value=MagicMock(username="testbot"))
-    
-    # Первый вызов (в группе) падает
-    async def side_effect(*args, **kwargs):
-        if kwargs.get("receiver_user_id") == 777:
-            raise Exception("TelegramBadRequest: ephemeral messages not supported")
-        return MagicMock(message_id=999)
-
-    mock_bot_fallback.send_message = AsyncMock(side_effect=side_effect)
-
-    await send_smart_message(
-        mock_bot_fallback,
+    # 2. Тест: редактирование эфемерного сообщения в группе
+    res = await edit_smart_message(
+        mock_bot,
         chat_id=-100123456,
-        html_text="Secret Menu",
+        message_id=555,
+        html_text="Updated text",
         receiver_user_id=777
     )
-    # Второй вызов send_message должен быть отправлен в ЛС: chat_id=777!
-    # Он НИ В КОЕМ СЛУЧАЕ не должен быть отправлен в chat_id=-100123456!
-    assert mock_bot_fallback.send_message.call_count == 2
-    second_call_kwargs = mock_bot_fallback.send_message.call_args_list[1][1]
-    assert second_call_kwargs.get("chat_id") == 777
+    mock_bot.edit_ephemeral_message_text.assert_called_once_with(
+        chat_id=-100123456,
+        receiver_user_id=777,
+        ephemeral_message_id=555,
+        text="Updated text",
+        parse_mode="HTML",
+        reply_markup=None
+    )
+    assert res is True
 
 
