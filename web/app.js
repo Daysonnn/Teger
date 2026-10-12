@@ -242,9 +242,9 @@ function renderRoles(roles) {
       <div class="members-wrap">${membersHtml}</div>
       <div class="role-actions">
         ${joinBtn}
-        <button class="btn-icon" onclick="openMemberModal('${esc(role.name)}')" title="Участники">👤+</button>
-        <button class="btn-icon" onclick="shareRoleLink('${esc(role.name)}')" title="Скопировать ссылку">🔗</button>
-        <button class="btn-danger" onclick="deleteRole('${esc(role.name)}')" title="Удалить">🗑</button>
+        <button class="btn-icon" onclick="openMemberModal('${esc(role.name)}')" title="Участники" aria-label="Управление участниками роли ${esc(role.name)}">👤+</button>
+        <button class="btn-icon" onclick="shareRoleLink('${esc(role.name)}')" title="Скопировать ссылку" aria-label="Скопировать ссылку на роль ${esc(role.name)}">🔗</button>
+        <button class="btn-danger" onclick="deleteRole('${esc(role.name)}')" title="Удалить" aria-label="Удалить роль ${esc(role.name)}">🗑</button>
       </div>
     `;
     frag.appendChild(card);

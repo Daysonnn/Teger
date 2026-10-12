@@ -10,6 +10,14 @@ from aiogram.methods.base import TelegramMethod
 
 logger = logging.getLogger(__name__)
 
+# Множество для сохранения сильных ссылок на фоновые таски (защита от сборщика мусора Python)
+_background_tasks: set[asyncio.Task] = set()
+
+def _track_task(task: asyncio.Task) -> asyncio.Task:
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
 # Таймауты по умолчанию (в секундах)
 TIMEOUT_WARNING = 6.0       # Ошибки прав, не найдено, кулдауны
 TIMEOUT_USAGE = 8.0         # Подсказки по использованию команд
@@ -83,7 +91,8 @@ def schedule_delete(
     receiver_user_id: Optional[int] = None
 ) -> asyncio.Task:
     """Планирует удаление сообщения через указанный промежуток времени в фоновой задаче."""
-    return asyncio.create_task(_delayed_delete_worker(bot, chat_id, message_id, delay_seconds, receiver_user_id=receiver_user_id))
+    task = asyncio.create_task(_delayed_delete_worker(bot, chat_id, message_id, delay_seconds, receiver_user_id=receiver_user_id))
+    return _track_task(task)
 
 async def reply_temp(
     message: Message,
@@ -105,7 +114,7 @@ async def reply_temp(
 
     # Мгновенно удаляем команду пользователя, чтобы чат не засорялся
     if not is_private and delete_trigger and message.message_id:
-        asyncio.create_task(_safe_delete_message(bot, chat_id, message.message_id, receiver_user_id=user_id))
+        _track_task(asyncio.create_task(_safe_delete_message(bot, chat_id, message.message_id, receiver_user_id=user_id)))
 
     try:
         sent_msg = await message.reply(
@@ -149,7 +158,7 @@ class ActiveMenuTracker:
             if old_task and not old_task.done():
                 old_task.cancel()
             # Удаляем старое меню мгновенно
-            asyncio.create_task(_safe_delete_message(bot, chat_id, old_msg_id, receiver_user_id=user_id))
+            _track_task(asyncio.create_task(_safe_delete_message(bot, chat_id, old_msg_id, receiver_user_id=user_id)))
 
         # Запускаем таймер автозакрытия нового меню
         async def _auto_close():
@@ -161,7 +170,7 @@ class ActiveMenuTracker:
             except asyncio.CancelledError:
                 pass
 
-        task = asyncio.create_task(_auto_close())
+        task = _track_task(asyncio.create_task(_auto_close()))
         self._active_menus[key] = (message_id, task)
 
     async def close_menu(self, bot: Bot, chat_id: int, user_id: int, message_id: int) -> bool:

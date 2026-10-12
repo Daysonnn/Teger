@@ -70,20 +70,21 @@ async def handle_join_role(request: web.Request):
     if result == "success":
         await db.add_audit_log(int(chat_id), int(user_id), username, "Вступил/Добавлен в роль", f"Роль: {role_name}")
         # Ачивки через Mini App (без bot объекта — только запись в БД, уведомление придёт при следующей активности)
-        if user_id:
-            await db.unlock_achievement(int(chat_id), int(user_id), "first_join")
+        if user_id and int(user_id) > 0:
+            uid_int = int(user_id)
+            await db.unlock_achievement(int(chat_id), uid_int, "first_join")
             # Мультикласс
             all_roles = await db.get_all_roles(int(chat_id))
             user_role_count = 0
             for r in all_roles:
                 members = await db.get_role_members(int(chat_id), r)
-                if any(m[0] == int(user_id) for m in members):
+                if any(m[0] == uid_int for m in members):
                     user_role_count += 1
             if user_role_count >= 3:
-                await db.unlock_achievement(int(chat_id), int(user_id), "multiclass")
-            import datetime
-            if 0 <= datetime.datetime.utcnow().hour < 6:
-                await db.unlock_achievement(int(chat_id), int(user_id), "night_shift")
+                await db.unlock_achievement(int(chat_id), uid_int, "multiclass")
+            from datetime import datetime, timezone
+            if 0 <= datetime.now(timezone.utc).hour < 6:
+                await db.unlock_achievement(int(chat_id), uid_int, "night_shift")
     return web.json_response({"status": result})
 
 async def handle_leave_role(request: web.Request):
@@ -292,42 +293,45 @@ async def handle_admin_send(request: web.Request):
         if not message_text:
             return web.json_response({"error": "Укажите текст сообщения"}, status=400)
 
-        token = os.getenv("TOKEN")
-        if not token:
-            return web.json_response({"error": "TOKEN бота не найден в настройках"}, status=500)
+        bot = request.app.get("bot")
+        close_session_after = False
+        if not bot:
+            token = os.getenv("TOKEN")
+            if not token:
+                return web.json_response({"error": "TOKEN бота не найден в настройках"}, status=500)
+            from aiogram import Bot
+            bot = Bot(token=token)
+            close_session_after = True
 
-        from aiogram import Bot
-        bot = Bot(token=token)
+        try:
+            if is_global or str(target_chat_id or '').strip().lower() in ["all", "global", "*"]:
+                all_chats = await db.get_all_chat_ids()
+                if not all_chats:
+                    return web.json_response({"error": "В базе данных пока нет чатов для рассылки."}, status=404)
 
-        if is_global or str(target_chat_id or '').strip().lower() in ["all", "global", "*"]:
-            all_chats = await db.get_all_chat_ids()
-            if not all_chats:
+                success_count = 0
+                fail_count = 0
+                for cid in all_chats:
+                    try:
+                        await bot.send_message(chat_id=cid, text=message_text, parse_mode="HTML")
+                        success_count += 1
+                    except Exception as ex:
+                        fail_count += 1
+                        logging.warning(f"Broadcast failed for {cid}: {ex}")
+
+                return web.json_response({
+                    "status": "success",
+                    "message": f"📢 Массовая рассылка завершена!\nУспешно отправлено в {success_count} чатов (ошибок: {fail_count})."
+                })
+            else:
+                if not target_chat_id:
+                    return web.json_response({"error": "Укажите Chat ID чата"}, status=400)
+
+                await bot.send_message(chat_id=target_chat_id, text=message_text, parse_mode="HTML")
+                return web.json_response({"status": "success", "message": "Сообщение успешно отправлено в чат!"})
+        finally:
+            if close_session_after:
                 await bot.session.close()
-                return web.json_response({"error": "В базе данных пока нет чатов для рассылки."}, status=404)
-
-            success_count = 0
-            fail_count = 0
-            for cid in all_chats:
-                try:
-                    await bot.send_message(chat_id=cid, text=message_text, parse_mode="HTML")
-                    success_count += 1
-                except Exception as ex:
-                    fail_count += 1
-                    logging.warning(f"Broadcast failed for {cid}: {ex}")
-
-            await bot.session.close()
-            return web.json_response({
-                "status": "success",
-                "message": f"📢 Массовая рассылка завершена!\nУспешно отправлено в {success_count} чатов (ошибок: {fail_count})."
-            })
-        else:
-            if not target_chat_id:
-                await bot.session.close()
-                return web.json_response({"error": "Укажите Chat ID чата"}, status=400)
-
-            await bot.send_message(chat_id=target_chat_id, text=message_text, parse_mode="HTML")
-            await bot.session.close()
-            return web.json_response({"status": "success", "message": "Сообщение успешно отправлено в чат!"})
 
     except Exception as e:
         logging.error(f"Error in admin send: {e}")

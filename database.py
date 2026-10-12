@@ -17,6 +17,8 @@ async def init_db():
     global _db_initialized
     async with aiosqlite.connect(DB_NAME) as conn:
         await conn.execute("PRAGMA foreign_keys = ON;")
+        await conn.execute("PRAGMA journal_mode = WAL;")
+        await conn.execute("PRAGMA synchronous = NORMAL;")
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS roles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -330,14 +332,14 @@ async def create_role(chat_id: int, role_name: str, emoji: str = "🛡️") -> b
 
 async def delete_role(chat_id: int, role_name: str) -> bool:
     async with get_db() as conn:
-        cursor = await conn.execute('DELETE FROM roles WHERE chat_id = ? AND name = ?', (chat_id, role_name))
+        cursor = await conn.execute('DELETE FROM roles WHERE chat_id = ? AND LOWER(name) = LOWER(?)', (chat_id, role_name))
         await conn.commit()
         return cursor.rowcount > 0
 
 async def join_role(chat_id: int, role_name: str, user_id: int, username: str) -> str:
     await record_chat_user(chat_id, user_id, username)
     async with get_db() as conn:
-        cursor = await conn.execute('SELECT id FROM roles WHERE chat_id = ? AND name = ?', (chat_id, role_name))
+        cursor = await conn.execute('SELECT id FROM roles WHERE chat_id = ? AND LOWER(name) = LOWER(?)', (chat_id, role_name))
         role = await cursor.fetchone()
         
         if not role:
@@ -365,7 +367,7 @@ async def join_role(chat_id: int, role_name: str, user_id: int, username: str) -
 
 async def leave_role(chat_id: int, role_name: str, user_id: int) -> bool:
     async with get_db() as conn:
-        cursor = await conn.execute('SELECT id FROM roles WHERE chat_id = ? AND name = ?', (chat_id, role_name))
+        cursor = await conn.execute('SELECT id FROM roles WHERE chat_id = ? AND LOWER(name) = LOWER(?)', (chat_id, role_name))
         role = await cursor.fetchone()
         if not role:
             return False
@@ -389,7 +391,7 @@ async def get_all_roles_with_details(chat_id: int) -> list[dict]:
 async def get_role_emoji(chat_id: int, role_name: str) -> str:
     """Возвращает эмодзи роли."""
     async with get_db() as conn:
-        cursor = await conn.execute("SELECT COALESCE(emoji, '🛡️') FROM roles WHERE chat_id = ? AND name = ?", (chat_id, role_name))
+        cursor = await conn.execute("SELECT COALESCE(emoji, '🛡️') FROM roles WHERE chat_id = ? AND LOWER(name) = LOWER(?)", (chat_id, role_name))
         row = await cursor.fetchone()
         return row[0] if row else "🛡️"
 
@@ -400,11 +402,11 @@ async def get_role_members(chat_id: int, role_name: str) -> list[tuple[int, str]
                 SELECT m.user_id, m.username,
                        ROW_NUMBER() OVER (
                            PARTITION BY COALESCE(NULLIF(LOWER(m.username), ''), CAST(m.user_id AS TEXT))
-                           ORDER BY m.user_id DESC
+                           ORDER BY user_id DESC
                        ) as rn
                 FROM members m
                 JOIN roles r ON m.role_id = r.id
-                WHERE r.chat_id = ? AND r.name = ?
+                WHERE r.chat_id = ? AND LOWER(r.name) = LOWER(?)
             ) WHERE rn = 1
         ''', (chat_id, role_name))
         rows = await cursor.fetchall()
@@ -664,17 +666,17 @@ async def cleanup_old_parties():
 def get_respect_rank_title(points: int) -> tuple[str, str]:
     """Возвращает тупл (значок, название ранга) в зависимости от количества очков респекта."""
     if points >= 50:
-        return ("", "Гигачад")
+        return ("🗿", "Гигачад")
     elif points >= 30:
-        return ("", "Легенда")
+        return ("👑", "Легенда")
     elif points >= 15:
-        return ("", "Авторитет")
+        return ("💎", "Авторитет")
     elif points >= 5:
-        return ("", "Уважаемый")
+        return ("⭐", "Уважаемый")
     elif points >= 1:
-        return ("", "Новичок")
+        return ("🌱", "Новичок")
     else:
-        return ("", "Прохожий")
+        return ("🚶", "Прохожий")
 
 async def give_respect(chat_id: int, from_user_id: int, to_user_id: int, to_username: str) -> tuple[str, int, tuple[str, str]]:
     """

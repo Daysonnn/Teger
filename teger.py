@@ -40,6 +40,7 @@ async def setup_commands(bot: Bot):
         BotCommand(command="menu", description="Панель управления ролями"),
         BotCommand(command="party", description="Собрать группу (например: /party 5 CS2)"),
         BotCommand(command="all", description="Позвать всех участников чата"),
+        BotCommand(command="top", description="Топ респекта группы"),
         BotCommand(command="sync", description="(Админ) Синхронизировать участников"),
         BotCommand(command="notify", description="(Админ) Срочное уведомление роли"),
         BotCommand(command="help", description="Справка"),

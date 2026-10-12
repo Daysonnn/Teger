@@ -16,7 +16,7 @@ from cachetools import TTLCache
 
 import database as db
 from cleaner import (
-    reply_temp, schedule_delete, _safe_delete_message, menu_tracker,
+    reply_temp, schedule_delete, _safe_delete_message, _track_task, menu_tracker,
     TIMEOUT_WARNING, TIMEOUT_USAGE, TIMEOUT_SUCCESS, TIMEOUT_SYNC, TIMEOUT_MENU
 )
 
@@ -556,7 +556,6 @@ async def help_cmd(message: Message):
     if not is_priv and owner_id:
         if sent_msg and hasattr(sent_msg, 'message_id'):
             await menu_tracker.register_menu(message.bot, chat_id, owner_id, sent_msg.message_id, auto_close_delay=TIMEOUT_MENU)
-        asyncio.create_task(_safe_delete_message(message.bot, chat_id, message.message_id))
 
 async def build_roles_rich_blocks(chat_id: int, roles_data: list) -> list:
     if not roles_data:
@@ -687,7 +686,7 @@ async def cb_help_unified(query: CallbackQuery):
     if query.data.startswith("cb:help:"):
         parts = query.data.split(":")
         chat_id = int(parts[2])
-        if len(parts) > 3 and (parts[3].isdigit() or (parts[3].startswith("-") and parts[3][1:].isdigit)):
+        if len(parts) > 3 and (parts[3].isdigit() or (parts[3].startswith("-") and parts[3][1:].isdigit())):
             owner_id = int(parts[3])
 
     if not await check_menu_access(query, owner_id):
@@ -726,14 +725,43 @@ async def cb_help_unified(query: CallbackQuery):
 @router.callback_query(F.data.startswith("cb:close:"))
 async def cb_close(query: CallbackQuery):
     parts = query.data.split(":")
-    chat_id = int(parts[2])
+    data_chat_id = int(parts[2])
     owner_id = int(parts[3]) if len(parts) > 3 and (parts[3].isdigit() or (parts[3].startswith("-") and parts[3][1:].isdigit())) else None
 
     if not await check_menu_access(query, owner_id):
         return
 
-    await menu_tracker.close_menu(query.bot, chat_id, query.from_user.id, query.message.message_id)
-    await safe_answer(query, "Меню закрыто")
+    # Подтверждаем клик мгновенно и тихо, без лишних всплывающих тостов
+    await safe_answer(query)
+
+    real_chat_id = query.message.chat.id if query.message else data_chat_id
+    msg_id = query.message.message_id if query.message else None
+
+    # Отменяем таймер автозакрытия в трекере меню
+    if msg_id:
+        await menu_tracker.close_menu(query.bot, real_chat_id, query.from_user.id, msg_id)
+        if data_chat_id != real_chat_id:
+            await menu_tracker.close_menu(query.bot, data_chat_id, query.from_user.id, msg_id)
+
+    # Гарантированно удаляем сообщение
+    deleted = False
+    if query.message:
+        try:
+            await query.message.delete()
+            deleted = True
+        except Exception:
+            pass
+
+    if not deleted and msg_id:
+        deleted = await _safe_delete_message(query.bot, real_chat_id, msg_id, receiver_user_id=query.from_user.id)
+
+    # Если Telegram заблокировал удаление (например, сообщение старше 48ч), очищаем кнопки
+    if not deleted and query.message:
+        try:
+            await query.message.edit_text("✖️ <i>Меню закрыто.</i>", parse_mode=ParseMode.HTML, reply_markup=None)
+            schedule_delete(query.bot, real_chat_id, msg_id, delay_seconds=3.0)
+        except Exception:
+            pass
 
 
 
@@ -986,8 +1014,8 @@ async def join_role(message: Message, command: CommandObject):
         if user_role_count >= 3:
             await try_unlock_achievement(bot_obj, chat_id, user.id, "multiclass")
         # Ночная активность: 00:00–06:00 UTC
-        import datetime
-        hour = datetime.datetime.utcnow().hour
+        from datetime import datetime, timezone
+        hour = datetime.now(timezone.utc).hour
         if 0 <= hour < 6:
             await try_unlock_achievement(bot_obj, chat_id, user.id, "night_shift")
     elif result == "already_in":
@@ -1043,7 +1071,6 @@ async def list_roles(message: Message):
     if message.from_user:
         if sent_msg and hasattr(sent_msg, 'message_id'):
             await menu_tracker.register_menu(message.bot, chat_id, message.from_user.id, sent_msg.message_id, auto_close_delay=TIMEOUT_MENU)
-        asyncio.create_task(_safe_delete_message(message.bot, chat_id, message.message_id))
 
 
 @router.message(Command("send"))
@@ -1209,7 +1236,6 @@ async def cmd_sync(message: Message, bot: Bot):
         f"💡 <i>Новые участники при входе или открытии Mini App добавляются автоматически.</i>",
         parse_mode=ParseMode.HTML
     )
-    asyncio.create_task(_safe_delete_message(bot, message.chat.id, message.message_id))
     schedule_delete(bot, message.chat.id, status_msg.message_id, delay_seconds=TIMEOUT_SYNC)
 
 @router.message(Command("all"))
@@ -1420,7 +1446,7 @@ async def change_party_title_cmd(message: Message, command: CommandObject, bot: 
     new_title = command.args.strip()
     updated_party = await db.update_party_title(party_id, new_title)
     if updated_party:
-        text, kb = format_party_message(updated_party)
+        blocks, text, kb = format_party_message(updated_party)
         try:
             await bot.edit_message_text(text, chat_id=message.chat.id, message_id=reply_msg_id, parse_mode=ParseMode.HTML, reply_markup=kb)
             await reply_temp(message, f"✅ Название сбора успешно изменено на «{html.escape(new_title)}»!", delay=TIMEOUT_SUCCESS)
@@ -1611,6 +1637,9 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
         _, party_data = await db.leave_party(party_id, target_uid)
         await callback.answer("Участник исключен из группы.")
 
+    elif action == "refresh":
+        await callback.answer("Данные обновлены")
+
     if party_data:
         blocks, text, kb = format_party_message(party_data)
         try:
@@ -1769,8 +1798,13 @@ async def dynamic_role_call(message: Message):
         uname = f"@{user.username}" if user.username else user.first_name
         await db.record_chat_user(message.chat.id, user.id, uname)
 
-    raw_cmd = message.text[1:].split()[0]
+    cmd_parts = message.text[1:].split()
+    if not cmd_parts:
+        return
+    raw_cmd = cmd_parts[0]
     command_text = raw_cmd.split('@')[0].lower()
+    if not command_text:
+        return
 
     if command_text in KNOWN_COMMANDS:
         return
