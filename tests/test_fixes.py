@@ -138,6 +138,34 @@ async def test_cb_close_deletes_message():
 
     # Проверяем, что сообщение было удалено
     mock_msg.delete.assert_called_once()
-    # Проверяем, что safe_answer вызван без раздражающего текста тоста
+    # Проверяем, что answer вызван без раздражающего текста тоста
     assert mock_query.answer.call_args[1].get("text") is None
+
+
+@pytest.mark.asyncio
+async def test_cb_close_allowed_for_any_user():
+    from handlers import cb_close
+    from aiogram.types import CallbackQuery
+
+    # Пользователь 99999 (не владелец 12345) нажимает "Закрыть меню"
+    mock_query = MagicMock(spec=CallbackQuery)
+    mock_query.data = "cb:close:-100999888:12345"
+    mock_query.from_user = MagicMock(spec=User)
+    mock_query.from_user.id = 99999  # Другой пользователь чата
+    mock_query.bot = MagicMock()
+    mock_query.bot.delete_message = AsyncMock(return_value=True)
+    mock_query.answer = AsyncMock()
+
+    mock_msg = MagicMock(spec=Message)
+    mock_msg.message_id = 1001
+    mock_msg.chat = MagicMock(spec=Chat)
+    mock_msg.chat.id = -100999888
+    mock_msg.chat.type = ChatType.SUPERGROUP
+    mock_msg.delete = AsyncMock(return_value=True)
+    mock_query.message = mock_msg
+
+    await cb_close(mock_query)
+
+    # Сообщение меню должно быть удалено без отказа
+    assert mock_query.bot.delete_message.called or mock_msg.delete.called
 

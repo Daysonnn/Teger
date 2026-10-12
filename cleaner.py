@@ -182,6 +182,13 @@ class ActiveMenuTracker:
                 task.cancel()
             self._active_menus.pop(key, None)
 
+        # Очищаем любое зарегистрированное меню в этом чате с данным message_id
+        for k, (mid, t) in list(self._active_menus.items()):
+            if k[0] == chat_id and mid == message_id:
+                if t and not t.done():
+                    t.cancel()
+                self._active_menus.pop(k, None)
+
         return await _safe_delete_message(bot, chat_id, message_id, receiver_user_id=user_id)
 
     def is_owner(self, action_user_id: int, owner_id: int) -> bool:

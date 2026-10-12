@@ -724,42 +724,60 @@ async def cb_help_unified(query: CallbackQuery):
 
 @router.callback_query(F.data.startswith("cb:close:"))
 async def cb_close(query: CallbackQuery):
-    parts = query.data.split(":")
-    data_chat_id = int(parts[2])
-    owner_id = int(parts[3]) if len(parts) > 3 and (parts[3].isdigit() or (parts[3].startswith("-") and parts[3][1:].isdigit())) else None
+    # Мгновенно и тихо подтверждаем клик, снимая спиннер с кнопки
+    try:
+        await query.answer()
+    except Exception:
+        pass
 
-    if not await check_menu_access(query, owner_id):
-        return
-
-    # Подтверждаем клик мгновенно и тихо, без лишних всплывающих тостов
-    await safe_answer(query)
-
-    real_chat_id = query.message.chat.id if query.message else data_chat_id
+    real_chat_id = query.message.chat.id if query.message else None
     msg_id = query.message.message_id if query.message else None
 
-    # Отменяем таймер автозакрытия в трекере меню
-    if msg_id:
-        await menu_tracker.close_menu(query.bot, real_chat_id, query.from_user.id, msg_id)
-        if data_chat_id != real_chat_id:
+    # Извлекаем fallback chat_id из callback_data
+    data_chat_id = None
+    try:
+        parts = query.data.split(":")
+        if len(parts) > 2 and parts[2]:
+            data_chat_id = int(parts[2])
+    except Exception:
+        pass
+
+    target_chat_id = real_chat_id or data_chat_id
+
+    # 1. Отменяем таймер автозакрытия в трекере активных меню
+    if target_chat_id and msg_id:
+        await menu_tracker.close_menu(query.bot, target_chat_id, query.from_user.id, msg_id)
+        if data_chat_id and data_chat_id != target_chat_id:
             await menu_tracker.close_menu(query.bot, data_chat_id, query.from_user.id, msg_id)
 
-    # Гарантированно удаляем сообщение
+    # 2. Непосредственно стираем сообщение меню из чата
     deleted = False
-    if query.message:
+
+    # Способ 1: Прямое удаление через bot.delete_message
+    if target_chat_id and msg_id:
+        try:
+            await query.bot.delete_message(chat_id=target_chat_id, message_id=msg_id)
+            deleted = True
+        except Exception:
+            pass
+
+    # Способ 2: Метод aiogram query.message.delete()
+    if not deleted and query.message:
         try:
             await query.message.delete()
             deleted = True
         except Exception:
             pass
 
-    if not deleted and msg_id:
-        deleted = await _safe_delete_message(query.bot, real_chat_id, msg_id, receiver_user_id=query.from_user.id)
+    # Способ 3: Безопасное удаление через cleaner (включая удаление эфемерных сообщений)
+    if not deleted and target_chat_id and msg_id:
+        deleted = await _safe_delete_message(query.bot, target_chat_id, msg_id, receiver_user_id=query.from_user.id)
 
-    # Если Telegram заблокировал удаление (например, сообщение старше 48ч), очищаем кнопки
+    # Способ 4: Если Telegram заблокировал удаление (сообщение старше 48ч), убираем кнопки и очищаем текст
     if not deleted and query.message:
         try:
             await query.message.edit_text("✖️ <i>Меню закрыто.</i>", parse_mode=ParseMode.HTML, reply_markup=None)
-            schedule_delete(query.bot, real_chat_id, msg_id, delay_seconds=3.0)
+            schedule_delete(query.bot, target_chat_id, msg_id, delay_seconds=1.5)
         except Exception:
             pass
 
