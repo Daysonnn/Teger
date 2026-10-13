@@ -2,6 +2,7 @@ import os
 import html
 import asyncio
 import logging
+from typing import Any
 from aiogram import Router, F, Bot, BaseMiddleware
 from aiogram.enums import ChatType, ParseMode
 from aiogram.filters import CommandObject, Command, CommandStart
@@ -39,6 +40,40 @@ async def sync_chat_administrators(bot: Bot, chat_id: int) -> int:
         logging.error(f"Error syncing chat administrators for {chat_id}: {e}")
         return 0
 
+def build_checkin_message(chat_id: int, count: int, is_welcome: bool = False) -> tuple[str, InlineKeyboardMarkup]:
+    """Формирует интерактивное сообщение переклички чата со счетчиком и кнопкой."""
+    if is_welcome:
+        header = (
+            "👋 <b>Teger успешно активирован в группе!</b>\n\n"
+            "📢 <b>Перекличка чата!</b>\n"
+            "Чтобы вы не пропускали важные сборы, призывы ролей и вызовы <code>/all</code>, "
+            "нажмите кнопку <b>«✅ Я в чате»</b> ниже (это займет 1 секунду)."
+        )
+    else:
+        header = (
+            "📢 <b>Перекличка чата!</b>\n\n"
+            "Чтобы вы не пропускали важные сборы, призывы ролей и вызовы <code>/all</code>, "
+            "нажмите кнопку <b>«✅ Я в чате»</b> ниже (это займет 1 секунду)."
+        )
+
+    text = (
+        f"{header}\n\n"
+        f"👥 <b>Зарегистрировано:</b> <b>{count} чел.</b>\n\n"
+        "💡 <i>Администратор: закрепите это сообщение с галочкой «Уведомить всех участников», чтобы зарегистрировать весь чат!</i>"
+    )
+
+    webapp_url = os.getenv("WEBAPP_URL")
+    kb_buttons = [
+        [InlineKeyboardButton(text="✅ Я в чате (Записаться)", callback_data=f"cb:checkin:{chat_id}")]
+    ]
+    if webapp_url:
+        kb_buttons.append([InlineKeyboardButton(text="📱 Выбрать роли (Mini App)", web_app=WebAppInfo(url=f"{webapp_url}?chat_id={chat_id}"))])
+    kb_buttons.append([
+        InlineKeyboardButton(text="📋 Список ролей", callback_data=f"cb:list:{chat_id}"),
+        InlineKeyboardButton(text="ℹ️ Справка", callback_data=f"cb:help:{chat_id}")
+    ])
+    return text, InlineKeyboardMarkup(inline_keyboard=kb_buttons)
+
 @router.my_chat_member(ChatMemberUpdatedFilter(member_status_changed=JOIN_TRANSITION))
 async def on_bot_added(event: ChatMemberUpdated, bot: Bot):
     """Срабатывает когда бота добавляют в группу или назначают админом."""
@@ -53,30 +88,66 @@ async def on_bot_added(event: ChatMemberUpdated, bot: Bot):
             uname = f"@{u.username}" if u.username else u.first_name
             await db.record_chat_user(chat_id, u.id, uname)
 
-        # 3. Отправляем онбординг-сообщение
-        webapp_url = os.getenv("WEBAPP_URL")
-        kb_buttons = []
-        if webapp_url:
-            kb_buttons.append([InlineKeyboardButton(text="📱 Выбрать роли (Mini App)", web_app=WebAppInfo(url=f"{webapp_url}?chat_id={chat_id}"))])
-        kb_buttons.append([
-            InlineKeyboardButton(text="📋 Список ролей", callback_data=f"cb:list:{chat_id}"),
-            InlineKeyboardButton(text="ℹ️ Справка", callback_data=f"cb:help:{chat_id}")
-        ])
-        keyboard = InlineKeyboardMarkup(inline_keyboard=kb_buttons)
-
-        welcome_text = (
-            "👋 <b>Teger успешно активирован в группе!</b>\n\n"
-            "🛡️ <b>Что я умею:</b>\n"
-            "• Раздавать роли участникам через удобный Mini App\n"
-            "• Призывать роли: <code>/название_роли</code>\n"
-            "• Собирать пати для игр и дел: <code>/party 5 Название</code>\n"
-            "• Синхронизировать участников: <code>/sync</code>\n\n"
-            "💡 <i>Нажмите кнопку ниже, чтобы зайти в Mini App и разобрать роли!</i>"
-        )
+        # 3. Отправляем онбординг-сообщение с перекличкой
+        count = await db.get_chat_users_count(chat_id)
+        welcome_text, keyboard = build_checkin_message(chat_id, count, is_welcome=True)
         try:
             await bot.send_message(chat_id, welcome_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
         except Exception as e:
             logging.error(f"Failed to send welcome message in {chat_id}: {e}")
+
+@router.message(Command("checkin", "init"))
+async def checkin_cmd(message: Message, bot: Bot):
+    """Интерактивная перекличка чата для быстрого сбора базы участников."""
+    if message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
+        await message.answer("ℹ️ Команда переклички доступна только в групповых чатах.")
+        return
+
+    chat_id = message.chat.id
+    # Подтягиваем админов чата и автора команды
+    await sync_chat_administrators(bot, chat_id)
+    if message.from_user and not message.from_user.is_bot:
+        u = message.from_user
+        uname = f"@{u.username}" if u.username else u.first_name
+        await db.record_chat_user(chat_id, u.id, uname)
+
+    count = await db.get_chat_users_count(chat_id)
+    text, kb = build_checkin_message(chat_id, count, is_welcome=False)
+    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+
+@router.callback_query(F.data.startswith("cb:checkin:"))
+async def cb_checkin(query: CallbackQuery):
+    """Обработка нажатия на кнопку 'Я в чате'."""
+    try:
+        parts = query.data.split(":")
+        chat_id = int(parts[2])
+    except Exception:
+        chat_id = query.message.chat.id if query.message and query.message.chat else 0
+
+    if not chat_id:
+        await safe_answer(query, "❌ Ошибка чата")
+        return
+
+    user = query.from_user
+    if not user:
+        return
+
+    uname = f"@{user.username}" if user.username else user.first_name
+    is_new, total_count = await db.checkin_chat_user(chat_id, user.id, uname)
+
+    if is_new:
+        await safe_answer(query, "✅ Отлично! Вы внесены в базу участников чата.")
+    else:
+        await safe_answer(query, "ℹ️ Вы уже есть в базе этого чата!")
+
+    if query.message:
+        try:
+            msg_text = query.message.text or query.message.caption or ""
+            is_welcome = "успешно активирован" in msg_text
+            new_text, kb = build_checkin_message(chat_id, total_count, is_welcome=is_welcome)
+            await query.message.edit_text(new_text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        except Exception:
+            pass
 
 @router.chat_member(ChatMemberUpdatedFilter(member_status_changed=JOIN_TRANSITION))
 async def on_user_joined(event: ChatMemberUpdated):
@@ -98,14 +169,28 @@ async def on_new_chat_members(message: Message):
             await db.record_chat_user(message.chat.id, user.id, uname)
 
 class UserRecorderMiddleware(BaseMiddleware):
-    async def __call__(self, handler, event: Message, data: dict):
-        if hasattr(event, "chat") and event.chat and event.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP) and event.from_user:
-            user = event.from_user
-            uname = f"@{user.username}" if user.username else user.first_name
-            await db.record_chat_user(event.chat.id, user.id, uname)
-        return await handler(event, data)
+    async def __call__(self, handler, event: Any, data: dict):
+        chat = data.get("event_chat")
+        user = data.get("event_from_user")
 
-router.message.middleware(UserRecorderMiddleware())
+        # Фоллбэк на случай прямой передачи Message / CallbackQuery в тестах
+        if not chat:
+            if hasattr(event, "chat"):
+                chat = event.chat
+            elif hasattr(event, "message") and hasattr(event.message, "chat"):
+                chat = event.message.chat
+
+        if not user:
+            if hasattr(event, "from_user"):
+                user = event.from_user
+            elif hasattr(event, "user"):
+                user = event.user
+
+        if chat and getattr(chat, "type", None) in (ChatType.GROUP, ChatType.SUPERGROUP, "group", "supergroup") and user and not getattr(user, "is_bot", False):
+            uname = f"@{user.username}" if user.username else user.first_name
+            await db.record_chat_user(chat.id, user.id, uname)
+
+        return await handler(event, data)
 
 # Эмодзи для ачивок
 ACH_ICONS = {
@@ -547,6 +632,7 @@ async def cb_help_unified(query: CallbackQuery):
         "• <code>/notify &lt;роль&gt; &lt;текст&gt;</code> — Срочное уведомление роли\n\n"
         "👥 <b>Вызов участников:</b>\n"
         "• <code>/all</code> — Позвать ВСЕХ участников чата\n"
+        "• <code>/checkin</code> — Перекличка чата (отметиться в базе)\n"
         "• <code>/&lt;роль&gt;</code> — Позвать роль (например, <code>/dev</code>)\n"
         "• <code>/join &lt;роль&gt;</code> / <code>/leave &lt;роль&gt;</code> — Вступить/выйти\n"
         "• <code>/party [места] [цель]</code> — Собрать группу\n\n"

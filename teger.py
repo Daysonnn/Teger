@@ -40,6 +40,7 @@ async def setup_commands(bot: Bot):
         BotCommand(command="menu", description="Панель управления ролями"),
         BotCommand(command="party", description="Собрать группу (например: /party 5 CS2)"),
         BotCommand(command="all", description="Позвать всех участников чата"),
+        BotCommand(command="checkin", description="Перекличка чата (отметиться в базе)"),
         BotCommand(command="sync", description="(Админ) Синхронизировать участников"),
         BotCommand(command="notify", description="(Админ) Срочное уведомление роли"),
         BotCommand(command="help", description="Справка"),
@@ -88,6 +89,7 @@ async def main():
     web_runner = await start_web_server(bot)
 
     dp = Dispatcher()
+    dp.update.outer_middleware(handlers.UserRecorderMiddleware())
     dp.include_router(handlers.router)
 
     # Собираем список зарегистрированных команд для dynamic_role_call
@@ -108,7 +110,16 @@ async def main():
         print("🤖 Бот запущен и ожидает сообщений...")
         await dp.start_polling(
             bot,
-            allowed_updates=["message", "callback_query", "chat_member", "my_chat_member", "inline_query"]
+            allowed_updates=[
+                "message",
+                "edited_message",
+                "callback_query",
+                "chat_member",
+                "my_chat_member",
+                "message_reaction",
+                "poll_answer",
+                "inline_query",
+            ]
         )
     finally:
         await web_runner.cleanup()

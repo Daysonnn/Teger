@@ -258,6 +258,74 @@ async def get_all_chat_users(chat_id: int) -> list[tuple[int, str]]:
         rows = await cursor.fetchall()
         return rows
 
+async def checkin_chat_user(chat_id: int, user_id: int, username: str) -> tuple[bool, int]:
+    """Регистрирует участника при интерактивном чек-ине. Возвращает (is_new, total_count)."""
+    if not chat_id or not user_id:
+        return False, 0
+    try:
+        async with get_db() as conn:
+            # 1. Если реальный юзер логинится, подчищаем его синтетический дубликат
+            if username and user_id > 0:
+                clean_un = username if username.startswith("@") else f"@{username}"
+                await conn.execute(
+                    'DELETE FROM chat_users WHERE chat_id = ? AND LOWER(username) = LOWER(?) AND user_id != ?',
+                    (chat_id, clean_un, user_id)
+                )
+
+            # 2. Проверяем наличие пользователя в chat_users
+            cursor = await conn.execute(
+                'SELECT 1 FROM chat_users WHERE chat_id = ? AND user_id = ?',
+                (chat_id, user_id)
+            )
+            exists = await cursor.fetchone() is not None
+
+            if not exists:
+                await conn.execute(
+                    'INSERT INTO chat_users (chat_id, user_id, username) VALUES (?, ?, ?)',
+                    (chat_id, user_id, username)
+                )
+            else:
+                await conn.execute(
+                    'UPDATE chat_users SET username = ? WHERE chat_id = ? AND user_id = ?',
+                    (username, chat_id, user_id)
+                )
+
+            await conn.commit()
+
+            # 3. Актуальное общее количество известных участников чата
+            count_cursor = await conn.execute('''
+                SELECT COUNT(DISTINCT user_id) FROM (
+                    SELECT user_id FROM chat_users WHERE chat_id = ?
+                    UNION
+                    SELECT m.user_id FROM members m JOIN roles r ON m.role_id = r.id WHERE r.chat_id = ?
+                )
+            ''', (chat_id, chat_id))
+            count_row = await count_cursor.fetchone()
+            total_count = count_row[0] if count_row else 0
+            return (not exists, total_count)
+    except Exception as e:
+        logger.warning(f"Error in checkin_chat_user: {e}")
+        return False, 0
+
+async def get_chat_users_count(chat_id: int) -> int:
+    """Возвращает общее количество известных участников чата (из chat_users и ролей)."""
+    if not chat_id:
+        return 0
+    try:
+        async with get_db() as conn:
+            cursor = await conn.execute('''
+                SELECT COUNT(DISTINCT user_id) FROM (
+                    SELECT user_id FROM chat_users WHERE chat_id = ?
+                    UNION
+                    SELECT m.user_id FROM members m JOIN roles r ON m.role_id = r.id WHERE r.chat_id = ?
+                )
+            ''', (chat_id, chat_id))
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+    except Exception as e:
+        logger.warning(f"Error in get_chat_users_count: {e}")
+        return 0
+
 # ==========================================
 # ALIASES MANAGEMENT
 # ==========================================

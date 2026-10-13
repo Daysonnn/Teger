@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import database as db
 from cleaner import _track_task, _background_tasks, schedule_delete
 from handlers import format_party_message, change_party_title_cmd, dynamic_role_call, KNOWN_COMMANDS, _collect_known_commands
-from aiogram.types import Message, User, Chat
+from aiogram.types import Message, User, Chat, CallbackQuery
 from aiogram.enums import ChatType
 
 
@@ -288,6 +288,161 @@ def test_mutating_api_endpoints_blocked_without_initdata(monkeypatch):
     # Злоумышленник посылает чужой user_id без initData подписи
     req = make_mocked_request("POST", "/api/create")
     assert get_request_user(req, fallback_user={"id": 12345}) is None
+
+
+@pytest.mark.asyncio
+async def test_checkin_chat_user_and_count():
+    await db.init_db()
+    chat_id = -100998877
+    user1 = 111
+    user2 = 222
+
+    async with db.get_db() as conn:
+        await conn.execute("DELETE FROM chat_users WHERE chat_id = ?", (chat_id,))
+        await conn.execute("DELETE FROM roles WHERE chat_id = ?", (chat_id,))
+        await conn.commit()
+
+    # Сначала 0 участников
+    assert await db.get_chat_users_count(chat_id) == 0
+
+    # Первый чек-ин юзера 1
+    is_new, count = await db.checkin_chat_user(chat_id, user1, "@user1")
+    assert is_new is True
+    assert count == 1
+
+    # Повторный чек-ин юзера 1
+    is_new2, count2 = await db.checkin_chat_user(chat_id, user1, "@user1_new")
+    assert is_new2 is False
+    assert count2 == 1
+
+    # Чек-ин юзера 2
+    is_new3, count3 = await db.checkin_chat_user(chat_id, user2, "@user2")
+    assert is_new3 is True
+    assert count3 == 2
+    assert await db.get_chat_users_count(chat_id) == 2
+
+
+def test_build_checkin_message():
+    from handlers import build_checkin_message
+    # Для приветственного сообщения
+    text_w, kb_w = build_checkin_message(-1001, 5, is_welcome=True)
+    assert "успешно активирован" in text_w
+    assert "Зарегистрировано:" in text_w and "5 чел." in text_w
+    assert kb_w.inline_keyboard[0][0].callback_data == "cb:checkin:-1001"
+    assert "Я в чате" in kb_w.inline_keyboard[0][0].text
+
+    # Для команды /checkin
+    text_c, kb_c = build_checkin_message(-1001, 12, is_welcome=False)
+    assert "Перекличка чата!" in text_c
+    assert "Зарегистрировано:" in text_c and "12 чел." in text_c
+    assert kb_c.inline_keyboard[0][0].callback_data == "cb:checkin:-1001"
+
+
+@pytest.mark.asyncio
+async def test_checkin_command_group_and_private():
+    from handlers import checkin_cmd
+    mock_bot = AsyncMock()
+    mock_bot.get_chat_administrators = AsyncMock(return_value=[])
+
+    # 1. Личный чат -> отказ
+    msg_priv = AsyncMock(spec=Message)
+    msg_priv.chat = MagicMock(type=ChatType.PRIVATE, id=123)
+    msg_priv.answer = AsyncMock()
+    await checkin_cmd(msg_priv, mock_bot)
+    assert "только в групповых чатах" in msg_priv.answer.call_args[0][0]
+
+    # 2. Групповой чат -> отправка сообщения со счетчиком и кнопкой
+    msg_group = AsyncMock(spec=Message)
+    msg_group.chat = MagicMock(type=ChatType.SUPERGROUP, id=-100888999)
+    msg_group.from_user = MagicMock(id=555, username="admin555", is_bot=False)
+    msg_group.answer = AsyncMock()
+
+    await checkin_cmd(msg_group, mock_bot)
+    msg_group.answer.assert_called_once()
+    sent_text = msg_group.answer.call_args[0][0]
+    sent_kb = msg_group.answer.call_args[1]["reply_markup"]
+    assert "Перекличка чата!" in sent_text
+    assert sent_kb.inline_keyboard[0][0].callback_data == "cb:checkin:-100888999"
+
+
+@pytest.mark.asyncio
+async def test_cb_checkin_flow():
+    from handlers import cb_checkin
+    chat_id = -100444333
+    user_id = 777666
+    username = "player1"
+
+    # Очистка
+    async with db.get_db() as conn:
+        await conn.execute("DELETE FROM chat_users WHERE chat_id = ?", (chat_id,))
+        await conn.commit()
+
+    mock_query = AsyncMock(spec=CallbackQuery)
+    mock_query.data = f"cb:checkin:{chat_id}"
+    mock_query.from_user = MagicMock(id=user_id, username=username, is_bot=False)
+    mock_msg = AsyncMock(spec=Message)
+    mock_msg.chat = MagicMock(id=chat_id, type=ChatType.SUPERGROUP)
+    mock_msg.text = "📢 Перекличка чата!\nЗарегистрировано: 0 чел."
+    mock_msg.caption = None
+    mock_msg.edit_text = AsyncMock()
+    mock_query.message = mock_msg
+    mock_query.answer = AsyncMock()
+
+    # Первый клик
+    await cb_checkin(mock_query)
+    mock_query.answer.assert_called_with(text="✅ Отлично! Вы внесены в базу участников чата.")
+    mock_msg.edit_text.assert_called_once()
+    edited_text = mock_msg.edit_text.call_args[0][0]
+    assert "Зарегистрировано:" in edited_text and "1 чел." in edited_text
+
+    # Второй клик того же пользователя
+    mock_query.answer.reset_mock()
+    mock_msg.edit_text.reset_mock()
+    await cb_checkin(mock_query)
+    mock_query.answer.assert_called_with(text="ℹ️ Вы уже есть в базе этого чата!")
+
+
+@pytest.mark.asyncio
+async def test_user_recorder_middleware_reactions_and_callbacks():
+    from handlers import UserRecorderMiddleware
+
+    chat_id = -100222111
+    user_rx = 333444
+    user_cb = 555666
+
+    async with db.get_db() as conn:
+        await conn.execute("DELETE FROM chat_users WHERE chat_id = ?", (chat_id,))
+        await conn.commit()
+
+    mw = UserRecorderMiddleware()
+    dummy_handler = AsyncMock()
+
+    chat = MagicMock(id=chat_id, type=ChatType.SUPERGROUP)
+    u_rx_user = MagicMock(id=user_rx, username="reactor", is_bot=False)
+
+    # 1. Реакция на сообщение
+    data_rx = {"event_chat": chat, "event_from_user": u_rx_user}
+    await mw(dummy_handler, MagicMock(), data_rx)
+
+    users_after_rx = await db.get_all_chat_users(chat_id)
+    assert any(u[0] == user_rx for u in users_after_rx)
+
+    # 2. Клик по инлайн-кнопке
+    u_cb_user = MagicMock(id=user_cb, username="clicker", is_bot=False)
+    data_cb = {"event_chat": chat, "event_from_user": u_cb_user}
+    await mw(dummy_handler, MagicMock(), data_cb)
+
+    users_after_cb = await db.get_all_chat_users(chat_id)
+    assert any(u[0] == user_cb for u in users_after_cb)
+    assert len(users_after_cb) == 2
+
+    # 3. Бот — не должен записываться
+    bot_user = MagicMock(id=999999, username="bot", is_bot=True)
+    data_bot = {"event_chat": chat, "event_from_user": bot_user}
+    await mw(dummy_handler, MagicMock(), data_bot)
+
+    users_after_bot = await db.get_all_chat_users(chat_id)
+    assert len(users_after_bot) == 2
 
 
 
