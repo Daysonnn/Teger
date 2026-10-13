@@ -162,10 +162,53 @@ async def test_cb_close_allowed_for_any_user():
     mock_msg.chat.id = -100999888
     mock_msg.chat.type = ChatType.SUPERGROUP
     mock_msg.delete = AsyncMock(return_value=True)
+    mock_msg.edit_text = AsyncMock()
     mock_query.message = mock_msg
 
     await cb_close(mock_query)
 
-    # Сообщение меню должно быть удалено без отказа
+    # Сообщение меню должно быть удалено без отказа и без редактирования текста
     assert mock_query.bot.delete_message.called or mock_msg.delete.called
+    assert not mock_msg.edit_text.called
+
+
+@pytest.mark.asyncio
+async def test_cb_close_cancels_timer_and_never_edits_text():
+    from handlers import cb_close
+    from cleaner import menu_tracker
+    from aiogram.types import CallbackQuery
+
+    chat_id = -100888777
+    user_id = 55555
+    msg_id = 2002
+
+    # Регистрируем меню в трекере
+    mock_bot = MagicMock()
+    await menu_tracker.register_menu(mock_bot, chat_id, user_id, msg_id, auto_close_delay=120.0)
+    assert (chat_id, user_id) in menu_tracker._active_menus
+
+    mock_query = MagicMock(spec=CallbackQuery)
+    mock_query.data = f"cb:close:{chat_id}:{user_id}"
+    mock_query.from_user = MagicMock(spec=User)
+    mock_query.from_user.id = user_id
+    mock_query.bot = mock_bot
+    mock_query.answer = AsyncMock()
+
+    mock_msg = MagicMock(spec=Message)
+    mock_msg.message_id = msg_id
+    mock_msg.chat = MagicMock(spec=Chat)
+    mock_msg.chat.id = chat_id
+    mock_msg.delete = AsyncMock(return_value=True)
+    mock_msg.edit_text = AsyncMock()
+    mock_query.message = mock_msg
+
+    await cb_close(mock_query)
+
+    # Меню снято с автозакрытия
+    assert (chat_id, user_id) not in menu_tracker._active_menus
+    # Сообщение удалено
+    mock_msg.delete.assert_called_once()
+    # edit_text НЕ вызван
+    assert not mock_msg.edit_text.called
+
 

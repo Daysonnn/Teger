@@ -724,7 +724,7 @@ async def cb_help_unified(query: CallbackQuery):
 
 @router.callback_query(F.data.startswith("cb:close:"))
 async def cb_close(query: CallbackQuery):
-    # Мгновенно и тихо подтверждаем клик, снимая спиннер с кнопки
+    # Мгновенно подтверждаем клик, снимая спиннер с кнопки
     try:
         await query.answer()
     except Exception:
@@ -733,7 +733,7 @@ async def cb_close(query: CallbackQuery):
     real_chat_id = query.message.chat.id if query.message else None
     msg_id = query.message.message_id if query.message else None
 
-    # Извлекаем fallback chat_id из callback_data
+    # Извлекаем fallback chat_id из callback_data (cb:close:<chat_id>:<owner_id>)
     data_chat_id = None
     try:
         parts = query.data.split(":")
@@ -744,42 +744,47 @@ async def cb_close(query: CallbackQuery):
 
     target_chat_id = real_chat_id or data_chat_id
 
-    # 1. Отменяем таймер автозакрытия в трекере активных меню
+    # 1. Отменяем автозакрытие меню в трекере
     if target_chat_id and msg_id:
-        await menu_tracker.close_menu(query.bot, target_chat_id, query.from_user.id, msg_id)
+        menu_tracker.cancel_menu_timer(target_chat_id, msg_id)
         if data_chat_id and data_chat_id != target_chat_id:
-            await menu_tracker.close_menu(query.bot, data_chat_id, query.from_user.id, msg_id)
+            menu_tracker.cancel_menu_timer(data_chat_id, msg_id)
 
-    # 2. Непосредственно стираем сообщение меню из чата
+    # 2. Мгновенно и полностью стираем сообщение меню из чата
     deleted = False
 
-    # Способ 1: Прямое удаление через bot.delete_message
-    if target_chat_id and msg_id:
-        try:
-            await query.bot.delete_message(chat_id=target_chat_id, message_id=msg_id)
-            deleted = True
-        except Exception:
-            pass
-
-    # Способ 2: Метод aiogram query.message.delete()
-    if not deleted and query.message:
+    # Способ 1: Прямой вызов aiogram query.message.delete()
+    if query.message:
         try:
             await query.message.delete()
             deleted = True
-        except Exception:
-            pass
+        except TelegramBadRequest as e:
+            if "message to delete not found" in str(e).lower():
+                deleted = True
+            else:
+                logging.warning(f"cb_close: query.message.delete failed: {e}")
+        except Exception as e:
+            logging.warning(f"cb_close: query.message.delete exception: {e}")
 
-    # Способ 3: Безопасное удаление через cleaner (включая удаление эфемерных сообщений)
+    # Способ 2: Прямое удаление через bot.delete_message
     if not deleted and target_chat_id and msg_id:
-        deleted = await _safe_delete_message(query.bot, target_chat_id, msg_id, receiver_user_id=query.from_user.id)
-
-    # Способ 4: Если Telegram заблокировал удаление (сообщение старше 48ч), убираем кнопки и очищаем текст
-    if not deleted and query.message:
         try:
-            await query.message.edit_text("✖️ <i>Меню закрыто.</i>", parse_mode=ParseMode.HTML, reply_markup=None)
-            schedule_delete(query.bot, target_chat_id, msg_id, delay_seconds=1.5)
-        except Exception:
-            pass
+            await query.bot.delete_message(chat_id=target_chat_id, message_id=msg_id)
+            deleted = True
+        except TelegramBadRequest as e:
+            if "message to delete not found" in str(e).lower():
+                deleted = True
+            else:
+                logging.warning(f"cb_close: query.bot.delete_message failed: {e}")
+        except Exception as e:
+            logging.warning(f"cb_close: query.bot.delete_message exception: {e}")
+
+    # Способ 3: Безопасное удаление через cleaner (включая эфемерные сообщения)
+    if not deleted and target_chat_id and msg_id:
+        try:
+            deleted = await _safe_delete_message(query.bot, target_chat_id, msg_id, receiver_user_id=query.from_user.id)
+        except Exception as e:
+            logging.warning(f"cb_close: _safe_delete_message exception: {e}")
 
 
 

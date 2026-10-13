@@ -173,6 +173,14 @@ class ActiveMenuTracker:
         task = _track_task(asyncio.create_task(_auto_close()))
         self._active_menus[key] = (message_id, task)
 
+    def cancel_menu_timer(self, chat_id: int, message_id: int):
+        """Отменяет таймер автозакрытия меню и удаляет его из списка активных без удаления сообщения."""
+        for k, (mid, t) in list(self._active_menus.items()):
+            if k[0] == chat_id and mid == message_id:
+                if t and not t.done():
+                    t.cancel()
+                self._active_menus.pop(k, None)
+
     async def close_menu(self, bot: Bot, chat_id: int, user_id: int, message_id: int) -> bool:
         """Закрывает и удаляет меню по запросу владельца."""
         key = (chat_id, user_id)
@@ -182,13 +190,7 @@ class ActiveMenuTracker:
                 task.cancel()
             self._active_menus.pop(key, None)
 
-        # Очищаем любое зарегистрированное меню в этом чате с данным message_id
-        for k, (mid, t) in list(self._active_menus.items()):
-            if k[0] == chat_id and mid == message_id:
-                if t and not t.done():
-                    t.cancel()
-                self._active_menus.pop(k, None)
-
+        self.cancel_menu_timer(chat_id, message_id)
         return await _safe_delete_message(bot, chat_id, message_id, receiver_user_id=user_id)
 
     def is_owner(self, action_user_id: int, owner_id: int) -> bool:
