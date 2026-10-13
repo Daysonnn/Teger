@@ -71,7 +71,7 @@ def test_main_menu_keyboard_private_clean():
 
 @pytest.mark.asyncio
 async def test_check_menu_access_owner_and_stranger():
-    # 1. Владелец нажимает на кнопку в группе
+    # 1. Владелец нажимает на кнопку в группе -> доступ разрешен
     owner_query = MagicMock()
     owner_query.message.chat.type = ChatType.SUPERGROUP
     owner_query.from_user.id = 12345
@@ -81,18 +81,17 @@ async def test_check_menu_access_owner_and_stranger():
     assert allowed is True
     owner_query.answer.assert_not_called()
 
-    # 2. Посторонний нажимает на кнопку в группе -> отказ с show_alert=True
+    # 2. Любой другой пользователь нажимает на кнопку -> доступ разрешен (эксклюзивный доступ вырезан)
     stranger_query = MagicMock()
     stranger_query.message.chat.type = ChatType.SUPERGROUP
     stranger_query.from_user.id = 99999
     stranger_query.answer = AsyncMock()
 
     allowed = await check_menu_access(stranger_query, owner_id=12345)
-    assert allowed is False
-    stranger_query.answer.assert_called_once()
-    assert stranger_query.answer.call_args[1].get("show_alert") is True
+    assert allowed is True
+    stranger_query.answer.assert_not_called()
 
-    # 3. В приватном чате доступ всегда разрешен
+    # 3. В приватном чате доступ также разрешен
     priv_query = MagicMock()
     priv_query.message.chat.type = ChatType.PRIVATE
     priv_query.from_user.id = 99999

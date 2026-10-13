@@ -38,10 +38,40 @@ async def _safe_delete_message(
     bot: Bot, 
     chat_id: int, 
     message_id: int, 
-    receiver_user_id: Optional[int] = None
+    receiver_user_id: Optional[int] = None,
+    ephemeral_message_id: Optional[int] = None
 ) -> bool:
     """Безопасно удаляет сообщение (обычное или эфемерное), подавляя ошибки отсутствия прав или уже удаленного сообщения."""
-    # 1. Сначала пробуем стандартное удаление
+    # 1. Если передан receiver_user_id, пробуем удалить как эфемерное сообщение
+    if receiver_user_id is not None:
+        target_eph_id = ephemeral_message_id or message_id
+        if hasattr(bot, "delete_ephemeral_message"):
+            try:
+                await bot.delete_ephemeral_message(
+                    chat_id=chat_id,
+                    receiver_user_id=receiver_user_id,
+                    ephemeral_message_id=target_eph_id
+                )
+                return True
+            except TelegramBadRequest as e:
+                msg = str(e).lower()
+                if "message to delete not found" in msg:
+                    return False
+                logger.debug(f"delete_ephemeral_message bad request ({e})")
+            except Exception as e:
+                logger.debug(f"delete_ephemeral_message error: {e}")
+
+        try:
+            await bot(DeleteEphemeralMessage(
+                chat_id=chat_id,
+                receiver_user_id=receiver_user_id,
+                ephemeral_message_id=target_eph_id
+            ))
+            return True
+        except Exception:
+            pass
+
+    # 2. Стандартное удаление через delete_message
     try:
         await bot.delete_message(chat_id=chat_id, message_id=message_id)
         return True
@@ -49,21 +79,9 @@ async def _safe_delete_message(
         msg = str(e).lower()
         if "message to delete not found" in msg:
             return False
-        logger.debug(f"Standard delete failed ({e}), checking ephemeral delete")
+        logger.debug(f"Standard delete failed ({e})")
     except Exception as e:
         logger.debug(f"Standard delete failed: {e}")
-
-    # 2. Если стандартное не удалось (например, сообщение помечено как эфемерное) и передан receiver_user_id
-    if receiver_user_id is not None:
-        try:
-            await bot(DeleteEphemeralMessage(
-                chat_id=chat_id,
-                receiver_user_id=receiver_user_id,
-                ephemeral_message_id=message_id
-            ))
-            return True
-        except Exception:
-            pass
 
     return False
 

@@ -212,3 +212,36 @@ async def test_cb_close_cancels_timer_and_never_edits_text():
     assert not mock_msg.edit_text.called
 
 
+@pytest.mark.asyncio
+async def test_cb_close_ephemeral_message_deleted():
+    from handlers import cb_close
+    from aiogram.types import CallbackQuery
+
+    mock_query = MagicMock(spec=CallbackQuery)
+    mock_query.data = "cb:close:-100999888:12345"
+    mock_query.from_user = MagicMock(spec=User)
+    mock_query.from_user.id = 12345
+    mock_query.bot = MagicMock()
+    mock_query.bot.delete_ephemeral_message = AsyncMock(return_value=True)
+    mock_query.answer = AsyncMock()
+
+    mock_msg = MagicMock(spec=Message)
+    mock_msg.message_id = 999
+    mock_msg.ephemeral_message_id = 888
+    mock_msg.receiver_user = MagicMock(id=12345)
+    mock_msg.chat = MagicMock(spec=Chat)
+    mock_msg.chat.id = -100999888
+    mock_msg.chat.type = ChatType.SUPERGROUP
+    mock_query.message = mock_msg
+
+    await cb_close(mock_query)
+
+    # Проверяем, что delete_ephemeral_message был вызван с правильными аргументами
+    mock_query.bot.delete_ephemeral_message.assert_called_once_with(
+        chat_id=-100999888,
+        receiver_user_id=12345,
+        ephemeral_message_id=888
+    )
+
+
+

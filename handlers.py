@@ -590,21 +590,8 @@ async def safe_answer(query: CallbackQuery, text: str | None = None):
     except Exception:
         pass
 
-async def check_menu_access(query: CallbackQuery, owner_id: int | None) -> bool:
-    """
-    Проверяет, что меню использует именно тот человек, который его запросил.
-    Если нажимает другой пользователь в группе, выдает модальное окно Telegram (show_alert=True),
-    которое видит ТОЛЬКО этот человек.
-    """
-    if query.message.chat.type == ChatType.PRIVATE:
-        return True
-    if owner_id is not None and query.from_user.id != owner_id:
-        await query.answer(
-            "⛔ Это меню открыто для другого пользователя!\n"
-            "Напишите /menu в чате, чтобы открыть своё меню.",
-            show_alert=True
-        )
-        return False
+async def check_menu_access(query: CallbackQuery, owner_id: int | None = None) -> bool:
+    """Функционал эксклюзивного доступа вырезан: любой участник чата может взаимодействовать с меню."""
     return True
 
 @router.callback_query(F.data.startswith("cb:menu:"))
@@ -612,9 +599,6 @@ async def cb_menu(query: CallbackQuery):
     parts = query.data.split(":")
     chat_id = int(parts[2])
     owner_id = int(parts[3]) if len(parts) > 3 and (parts[3].isdigit() or (parts[3].startswith("-") and parts[3][1:].isdigit())) else None
-
-    if not await check_menu_access(query, owner_id):
-        return
 
     is_priv = (query.message.chat.type == ChatType.PRIVATE)
     bot_info = await query.bot.get_me()
@@ -643,9 +627,6 @@ async def cb_list(query: CallbackQuery):
     parts = query.data.split(":")
     chat_id = int(parts[2])
     owner_id = int(parts[3]) if len(parts) > 3 and (parts[3].isdigit() or (parts[3].startswith("-") and parts[3][1:].isdigit())) else None
-
-    if not await check_menu_access(query, owner_id):
-        return
 
     roles_data = await db.get_all_roles_with_details(chat_id)
     is_priv = (query.message.chat.type == ChatType.PRIVATE)
@@ -689,9 +670,6 @@ async def cb_help_unified(query: CallbackQuery):
         if len(parts) > 3 and (parts[3].isdigit() or (parts[3].startswith("-") and parts[3][1:].isdigit())):
             owner_id = int(parts[3])
 
-    if not await check_menu_access(query, owner_id):
-        return
-
     is_priv = (query.message.chat.type == ChatType.PRIVATE)
     bot_info = await query.bot.get_me()
     bot_user = html.escape(bot_info.username)
@@ -732,6 +710,8 @@ async def cb_close(query: CallbackQuery):
 
     real_chat_id = query.message.chat.id if query.message else None
     msg_id = query.message.message_id if query.message else None
+    eph_id = getattr(query.message, "ephemeral_message_id", None) if query.message else None
+    receiver_id = getattr(getattr(query.message, "receiver_user", None), "id", None) or query.from_user.id
 
     # Извлекаем fallback chat_id из callback_data (cb:close:<chat_id>:<owner_id>)
     data_chat_id = None
@@ -745,16 +725,40 @@ async def cb_close(query: CallbackQuery):
     target_chat_id = real_chat_id or data_chat_id
 
     # 1. Отменяем автозакрытие меню в трекере
-    if target_chat_id and msg_id:
-        menu_tracker.cancel_menu_timer(target_chat_id, msg_id)
+    if target_chat_id:
+        if msg_id:
+            menu_tracker.cancel_menu_timer(target_chat_id, msg_id)
+        if eph_id:
+            menu_tracker.cancel_menu_timer(target_chat_id, eph_id)
         if data_chat_id and data_chat_id != target_chat_id:
-            menu_tracker.cancel_menu_timer(data_chat_id, msg_id)
+            if msg_id:
+                menu_tracker.cancel_menu_timer(data_chat_id, msg_id)
+            if eph_id:
+                menu_tracker.cancel_menu_timer(data_chat_id, eph_id)
 
-    # 2. Мгновенно и полностью стираем сообщение меню из чата
+    # 2. Мгновенно и полностью стираем сообщение меню из чата (поддерживая обычные и эфемерные сообщения)
     deleted = False
+    eff_eph_id = eph_id or msg_id
 
-    # Способ 1: Прямой вызов aiogram query.message.delete()
-    if query.message:
+    # Способ 1: Нативное удаление эфемерного сообщения (если сообщение эфемерное "Видите только Вы")
+    if target_chat_id and eff_eph_id and receiver_id and hasattr(query.bot, "delete_ephemeral_message"):
+        try:
+            await query.bot.delete_ephemeral_message(
+                chat_id=target_chat_id,
+                receiver_user_id=receiver_id,
+                ephemeral_message_id=eff_eph_id
+            )
+            deleted = True
+        except TelegramBadRequest as e:
+            if "message to delete not found" in str(e).lower():
+                deleted = True
+            else:
+                logging.debug(f"cb_close: delete_ephemeral_message bad request: {e}")
+        except Exception as e:
+            logging.debug(f"cb_close: delete_ephemeral_message exception: {e}")
+
+    # Способ 2: Прямой вызов aiogram query.message.delete()
+    if not deleted and query.message:
         try:
             await query.message.delete()
             deleted = True
@@ -762,11 +766,11 @@ async def cb_close(query: CallbackQuery):
             if "message to delete not found" in str(e).lower():
                 deleted = True
             else:
-                logging.warning(f"cb_close: query.message.delete failed: {e}")
+                logging.debug(f"cb_close: query.message.delete failed: {e}")
         except Exception as e:
-            logging.warning(f"cb_close: query.message.delete exception: {e}")
+            logging.debug(f"cb_close: query.message.delete exception: {e}")
 
-    # Способ 2: Прямое удаление через bot.delete_message
+    # Способ 3: Прямое удаление через bot.delete_message
     if not deleted and target_chat_id and msg_id:
         try:
             await query.bot.delete_message(chat_id=target_chat_id, message_id=msg_id)
@@ -775,16 +779,22 @@ async def cb_close(query: CallbackQuery):
             if "message to delete not found" in str(e).lower():
                 deleted = True
             else:
-                logging.warning(f"cb_close: query.bot.delete_message failed: {e}")
+                logging.debug(f"cb_close: query.bot.delete_message failed: {e}")
         except Exception as e:
-            logging.warning(f"cb_close: query.bot.delete_message exception: {e}")
+            logging.debug(f"cb_close: query.bot.delete_message exception: {e}")
 
-    # Способ 3: Безопасное удаление через cleaner (включая эфемерные сообщения)
-    if not deleted and target_chat_id and msg_id:
+    # Способ 4: Безопасное удаление через cleaner (включая эфемерный фоллбэк)
+    if not deleted and target_chat_id and (msg_id or eff_eph_id):
         try:
-            deleted = await _safe_delete_message(query.bot, target_chat_id, msg_id, receiver_user_id=query.from_user.id)
+            deleted = await _safe_delete_message(
+                query.bot, 
+                target_chat_id, 
+                msg_id or eff_eph_id, 
+                receiver_user_id=receiver_id,
+                ephemeral_message_id=eff_eph_id
+            )
         except Exception as e:
-            logging.warning(f"cb_close: _safe_delete_message exception: {e}")
+            logging.debug(f"cb_close: _safe_delete_message exception: {e}")
 
 
 
