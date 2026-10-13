@@ -131,8 +131,16 @@ async function refreshCurrentTab() {
 }
 
 // ---- API ----
+async function apiFetch(url, options = {}) {
+  const headers = Object.assign({}, options.headers);
+  if (tg && tg.initData) {
+    headers['X-Telegram-Init-Data'] = tg.initData;
+  }
+  return fetch(url, { ...options, headers });
+}
+
 async function apiPost(url, body) {
-  const res = await fetch(url, {
+  const res = await apiFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
@@ -144,7 +152,7 @@ async function apiPost(url, body) {
 async function checkOwnerStatus() {
   if (!currentUser.id) return;
   try {
-    const res = await fetch(`/api/admin/check?user_id=${currentUser.id}`);
+    const res = await apiFetch(`/api/admin/check?user_id=${currentUser.id}`);
     const data = await res.json();
     if (data.is_owner) {
       isOwnerUser = true;
@@ -183,7 +191,7 @@ async function fetchRoles() {
       const uname = currentUser.username ? `@${currentUser.username}` : (currentUser.first_name || '');
       url += `&user_id=${currentUser.id}&username=${encodeURIComponent(uname)}`;
     }
-    const res = await fetch(url);
+    const res = await apiFetch(url);
     const data = await res.json();
     allRolesCache = data.roles || [];
 
@@ -324,7 +332,7 @@ async function deleteRole(name) {
 async function fetchChatMembers() {
   if (!chatId) return;
   try {
-    const res = await fetch(`/api/chat_members?chat_id=${chatId}`);
+    const res = await apiFetch(`/api/chat_members?chat_id=${chatId}`);
     const data = await res.json();
     chatMembersCache = data.members || [];
     animateCount(document.getElementById('stat-members-count'), chatMembersCache.length);
@@ -397,7 +405,7 @@ async function syncAdminsFromWebApp() {
   haptic('medium');
   toast('Синхронизация админов...');
   try {
-    const res = await fetch(`/api/chat_members/sync?chat_id=${chatId}`);
+    const res = await apiFetch(`/api/chat_members/sync?chat_id=${chatId}`);
     const data = await res.json();
     if (data.status === 'success') {
       toast(`Синхронизировано: ${data.synced} админов`);
@@ -415,7 +423,7 @@ async function syncAdminsFromWebApp() {
 async function fetchAuditLogs() {
   if (!chatId) return;
   try {
-    const res = await fetch(`/api/audit_logs?chat_id=${chatId}`);
+    const res = await apiFetch(`/api/audit_logs?chat_id=${chatId}`);
     const data = await res.json();
     renderLogs(data.logs || []);
   } catch {}
@@ -455,7 +463,7 @@ async function fetchAchievements() {
     const url = chatId
       ? `/api/achievements?user_id=${currentUser.id}&chat_id=${chatId}`
       : `/api/achievements?user_id=${currentUser.id}`;
-    const res = await fetch(url);
+    const res = await apiFetch(url);
     const data = await res.json();
     const achs = data.achievements || [];
 
@@ -511,7 +519,7 @@ function renderAchievements(achs) {
 async function fetchAdminStats() {
   if (!isOwnerUser) return;
   try {
-    const res = await fetch(`/api/admin/stats?user_id=${currentUser.id}`);
+    const res = await apiFetch(`/api/admin/stats?user_id=${currentUser.id}`);
     const data = await res.json();
     if (data.stats) {
       animateCount(document.getElementById('admin-stat-chats'), data.stats.chats);
@@ -579,7 +587,7 @@ async function openMemberModal(roleName) {
 
 async function loadAliases(roleName) {
   try {
-    const res = await fetch(`/api/aliases?chat_id=${chatId}&role_name=${encodeURIComponent(roleName)}`);
+    const res = await apiFetch(`/api/aliases?chat_id=${chatId}&role_name=${encodeURIComponent(roleName)}`);
     const data = await res.json();
     renderAliases(data.aliases || []);
   } catch (e) {

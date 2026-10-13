@@ -35,10 +35,6 @@ async def test_active_menu_tracker_flow():
     assert closed is True
     assert (chat_id, user_id) not in tracker._active_menus
 
-    # Проверка владельца
-    assert tracker.is_owner(12345, 12345) is True
-    assert tracker.is_owner(99999, 12345) is False
-
 
 def test_main_menu_keyboard_group_has_lock_and_close():
     chat_id = -1001234
@@ -103,7 +99,6 @@ async def test_check_menu_access_owner_and_stranger():
 
 def test_ephemeral_models_structure():
     from cleaner import DeleteEphemeralMessage
-    from handlers import SendEphemeralMessage, SendRichMessage
 
     # 1. DeleteEphemeralMessage
     del_cmd = DeleteEphemeralMessage(chat_id=-100123, receiver_user_id=456, ephemeral_message_id=789)
@@ -112,28 +107,6 @@ def test_ephemeral_models_structure():
     assert dumped_del["receiver_user_id"] == 456
     assert dumped_del["ephemeral_message_id"] == 789
     assert del_cmd.__api_method__ == "deleteEphemeralMessage"
-
-    # 2. SendEphemeralMessage
-    send_cmd = SendEphemeralMessage(
-        chat_id=-100123,
-        text="Hello",
-        ephemeral_message_parameters={"receiver_user_id": 456}
-    )
-    dumped_send = send_cmd.model_dump(exclude_none=True)
-    assert dumped_send["chat_id"] == -100123
-    assert dumped_send["text"] == "Hello"
-    assert dumped_send["ephemeral_message_parameters"]["receiver_user_id"] == 456
-    assert send_cmd.__api_method__ == "sendMessage"
-
-    # 3. SendRichMessage с ephemeral_message_parameters
-    rich_cmd = SendRichMessage(
-        chat_id=-100123,
-        rich_message={"blocks": []},
-        ephemeral_message_parameters={"receiver_user_id": 456}
-    )
-    dumped_rich = rich_cmd.model_dump(exclude_none=True)
-    assert dumped_rich["ephemeral_message_parameters"]["receiver_user_id"] == 456
-    assert rich_cmd.__api_method__ == "sendRichMessage"
 
 
 @pytest.mark.asyncio

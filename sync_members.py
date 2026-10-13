@@ -63,19 +63,31 @@ async def main():
 
     async with client:
         print(f"🔍 Сканирование участников чата {chat_target}...")
+        try:
+            entity = await client.get_entity(chat_target)
+            numeric_chat_id = entity.id
+            if numeric_chat_id > 0:
+                numeric_chat_id = int(f"-100{numeric_chat_id}")
+        except Exception as e:
+            if isinstance(chat_target, int):
+                numeric_chat_id = chat_target
+            else:
+                raise e
+
+        records = []
         count = 0
         async for user in client.iter_participants(chat_target):
             if user.bot:
                 continue
             
             uname = f"@{user.username}" if user.username else (user.first_name or f"User {user.id}")
-            numeric_chat_id = chat_target if isinstance(chat_target, int) else (await client.get_entity(chat_target)).id
-            if numeric_chat_id > 0:
-                numeric_chat_id = int(f"-100{numeric_chat_id}")
-
-            await db.record_chat_user(numeric_chat_id, user.id, uname)
+            records.append((numeric_chat_id, user.id, uname))
             count += 1
-            print(f"[{count}] Добавлен: {uname} (ID: {user.id})")
+            if count % 50 == 0:
+                print(f"[{count}] Считано: {uname} (ID: {user.id})")
+
+        if records:
+            await db.record_chat_users_batch(records)
 
         print(f"\n🎉 Успешно! Синхронизировано {count} участников прямо в roles_bot.db.")
         print("Теперь бот и Mini App сразу знают всех участников этой группы!")

@@ -60,8 +60,8 @@ async def on_bot_added(event: ChatMemberUpdated, bot: Bot):
         if webapp_url:
             kb_buttons.append([InlineKeyboardButton(text="📱 Выбрать роли (Mini App)", web_app=WebAppInfo(url=f"{webapp_url}?chat_id={chat_id}"))])
         kb_buttons.append([
-            InlineKeyboardButton(text="📋 Список ролей", callback_data="btn_list_roles"),
-            InlineKeyboardButton(text="ℹ️ Справка", callback_data="btn_help")
+            InlineKeyboardButton(text="📋 Список ролей", callback_data=f"cb:list:{chat_id}"),
+            InlineKeyboardButton(text="ℹ️ Справка", callback_data=f"cb:help:{chat_id}")
         ])
         keyboard = InlineKeyboardMarkup(inline_keyboard=kb_buttons)
 
@@ -143,42 +143,57 @@ async def try_unlock_achievement(bot: Bot, chat_id: int, user_id: int, ach_id: s
         pass  # пользователь не начал диалог — ничего страшного
 
 
-class SendRichMessage(TelegramMethod[Message]):
-    """Кастомный метод Telegram Bot API 10.1+ для отправки структурированных Rich Messages."""
-    __returning__ = Message
-    __api_method__ = "sendRichMessage"
+BOT_USERNAME: str = "tegerrbot"
 
-    chat_id: int | str
-    rich_message: dict
-    reply_markup: InlineKeyboardMarkup | None = None
-    ephemeral_message_parameters: dict | None = None
+def set_bot_username(username: str | None):
+    global BOT_USERNAME
+    if username:
+        BOT_USERNAME = username.lstrip("@")
 
-class SendEphemeralMessage(TelegramMethod[Message]):
-    """Метод Telegram Bot API 10.2+ для отправки эфемерных сообщений конкретному пользователю."""
-    __returning__ = Message
-    __api_method__ = "sendMessage"
+def get_bot_username() -> str:
+    return BOT_USERNAME
 
-    chat_id: int | str
-    text: str
-    parse_mode: str | None = None
-    reply_markup: InlineKeyboardMarkup | None = None
-    ephemeral_message_parameters: dict | None = None
-    receiver_user_id: int | None = None
-    reply_parameters: dict | None = None
+async def process_join_achievements(bot: Bot | None, chat_id: int, user_id: int):
+    """Централизованная выдача ачивок при вступлении в роль."""
+    if bot:
+        await try_unlock_achievement(bot, chat_id, user_id, "first_join")
+    else:
+        await db.unlock_achievement(chat_id, user_id, "first_join")
+
+    # Мультикласс: если пользователь состоит в 3+ ролях
+    try:
+        roles_with_members = await db.get_roles_with_members(chat_id)
+        user_roles_count = sum(1 for r in roles_with_members if any(m[0] == user_id for m in r.get("members", [])))
+        if user_roles_count >= 3:
+            if bot:
+                await try_unlock_achievement(bot, chat_id, user_id, "multiclass")
+            else:
+                await db.unlock_achievement(chat_id, user_id, "multiclass")
+    except Exception as e:
+        logging.debug(f"Error checking multiclass: {e}")
+
+    # Ночная активность: 00:00–06:00 UTC
+    try:
+        from datetime import datetime, timezone
+        if 0 <= datetime.now(timezone.utc).hour < 6:
+            if bot:
+                await try_unlock_achievement(bot, chat_id, user_id, "night_shift")
+            else:
+                await db.unlock_achievement(chat_id, user_id, "night_shift")
+    except Exception as e:
+        logging.debug(f"Error checking night_shift: {e}")
 
 async def send_smart_message(
     bot: Bot, 
     chat_id: int, 
     html_text: str, 
     reply_markup: InlineKeyboardMarkup | None = None, 
-    rich_blocks: list | None = None,
     reply_to_message_id: int | None = None,
     receiver_user_id: int | None = None
 ) -> Message:
     """
     Отправляет сообщение в чат. Если указан receiver_user_id, сначала пробует отправить
-    нативное эфемерное сообщение (видимое только отправителю). При отсутствии поддержки
-    со стороны Telegram API плавно переключается на стандартную отправку с защитой по owner_id.
+    нативное эфемерное сообщение (видимое только отправителю).
     """
     safe_text = html_text if (html_text and html_text.strip()) else "📋 <b>Информация</b>"
 
@@ -193,9 +208,9 @@ async def send_smart_message(
                 receiver_user_id=receiver_user_id
             )
         except Exception as e:
-            logging.warning(f"Native ephemeral send_message failed ({e}), falling back to standard send")
+            logging.debug(f"Native ephemeral send_message fallback: {e}")
 
-    # 2. Стандартная отправка в чат (защищена по owner_id и auto_close)
+    # 2. Стандартная отправка в чат
     return await bot.send_message(
         chat_id=chat_id,
         text=safe_text,
@@ -203,29 +218,17 @@ async def send_smart_message(
         reply_markup=reply_markup
     )
 
-class EditMessageTextRich(TelegramMethod[Message | bool]):
-    """Кастомный метод Telegram Bot API 10.1+ для редактирования сообщений с Rich Messages."""
-    __returning__ = Message | bool
-    __api_method__ = "editMessageText"
-
-    chat_id: int | str | None = None
-    message_id: int | None = None
-    inline_message_id: str | None = None
-    rich_message: dict | None = None
-    reply_markup: InlineKeyboardMarkup | None = None
-
-from aiogram.exceptions import TelegramBadRequest
-
 async def edit_smart_message(
     bot: Bot, 
     chat_id: int, 
     message_id: int,
     html_text: str, 
     reply_markup: InlineKeyboardMarkup | None = None, 
-    rich_blocks: list | None = None,
     receiver_user_id: int | None = None
 ) -> Message | bool:
     """Редактирует сообщение, поддерживая нативные эфемерные сообщения и стандартные сообщения."""
+    safe_text = html_text if (html_text and html_text.strip()) else "📋 <b>Информация</b>"
+
     # 1. Если сообщение эфемерное (передан receiver_user_id), пробуем edit_ephemeral_message_text
     if receiver_user_id:
         try:
@@ -233,37 +236,22 @@ async def edit_smart_message(
                 chat_id=chat_id,
                 receiver_user_id=receiver_user_id,
                 ephemeral_message_id=message_id,
-                text=html_text,
+                text=safe_text,
                 parse_mode=ParseMode.HTML,
                 reply_markup=reply_markup
             )
         except TelegramBadRequest as e:
             if "message is not modified" in str(e).lower():
                 return True
-            logging.debug(f"edit_ephemeral_message_text bad request ({e}), falling back to standard edit")
+            logging.debug(f"edit_ephemeral_message_text bad request: {e}")
         except Exception as e:
-            logging.debug(f"edit_ephemeral_message_text failed ({e}), falling back to standard edit")
-
-    if rich_blocks:
-        try:
-            return await bot(EditMessageTextRich(
-                chat_id=chat_id,
-                message_id=message_id,
-                rich_message={"blocks": rich_blocks},
-                reply_markup=reply_markup
-            ))
-        except TelegramBadRequest as e:
-            if "message is not modified" in str(e).lower():
-                return True
-            logging.error(f"EditMessageTextRich bad request: {e}")
-        except Exception as e:
-            logging.error(f"EditMessageTextRich error: {e}")
+            logging.debug(f"edit_ephemeral_message_text failed: {e}")
 
     try:
         return await bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
-            text=html_text,
+            text=safe_text,
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
@@ -275,6 +263,7 @@ async def edit_smart_message(
 def get_main_menu_keyboard(chat_id: int, is_private: bool = False, owner_id: int | None = None, bot_username: str | None = None) -> InlineKeyboardMarkup:
     """Главное меню с кнопкой Mini App, защитой по owner_id и кнопкой закрытия."""
     webapp_url = os.getenv("WEBAPP_URL")
+    username = bot_username or get_bot_username()
     buttons = []
     
     if webapp_url:
@@ -282,7 +271,6 @@ def get_main_menu_keyboard(chat_id: int, is_private: bool = False, owner_id: int
             url = f"{webapp_url}?chat_id={chat_id}"
             btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", web_app=WebAppInfo(url=url))
         else:
-            username = bot_username or "tegerrbot"
             tg_app_link = f"https://t.me/{username}?startapp={chat_id}"
             btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", url=tg_app_link)
         buttons.append([btn])
@@ -300,11 +288,10 @@ def get_main_menu_keyboard(chat_id: int, is_private: bool = False, owner_id: int
         InlineKeyboardButton(text="❓ Справка", callback_data=f"cb:help:{chat_id}{owner_suffix}")
     ]
     if not is_private:
-        username = bot_username or "tegerrbot"
         row_3.append(InlineKeyboardButton(text="📩 Меню в ЛС", url=f"https://t.me/{username}?start=menu_{chat_id}"))
     buttons.append(row_3)
 
-    # 4 РЯД: Закрыть меню (для поддержания чистоты чата)
+    # 4 РЯД: Закрыть меню
     if not is_private:
         buttons.append([
             InlineKeyboardButton(text="❌ Закрыть меню", callback_data=f"cb:close:{chat_id}{owner_suffix}")
@@ -316,13 +303,13 @@ def get_main_menu_keyboard(chat_id: int, is_private: bool = False, owner_id: int
 def get_back_keyboard(chat_id: int, is_private: bool = False, owner_id: int | None = None, bot_username: str | None = None) -> InlineKeyboardMarkup:
     """Кнопка возврата в главное меню."""
     webapp_url = os.getenv("WEBAPP_URL")
+    username = bot_username or get_bot_username()
     buttons = []
     if webapp_url:
         if is_private:
             url = f"{webapp_url}?chat_id={chat_id}"
             btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", web_app=WebAppInfo(url=url))
         else:
-            username = bot_username or "tegerrbot"
             tg_app_link = f"https://t.me/{username}?startapp={chat_id}"
             btn = InlineKeyboardButton(text="📱 Открыть ролевую панель", url=tg_app_link)
         buttons.append([btn])
@@ -335,16 +322,6 @@ def get_back_keyboard(chat_id: int, is_private: bool = False, owner_id: int | No
         back_row.append(InlineKeyboardButton(text="❌ Закрыть", callback_data=f"cb:close:{chat_id}{owner_suffix}"))
     buttons.append(back_row)
     return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
-def escape_md(text: str | int | None) -> str:
-    """Экранирует специальные символы Telegram MarkdownV2."""
-    if text is None:
-        return ""
-    s = str(text)
-    for char in r"_*[]()~`>#+-=|{}.!":
-        s = s.replace(char, f"\\{char}")
-    return s
 
 def format_user_mention(user_id: int, username: str) -> str:
     """Форматирует упоминание пользователя в HTML."""
@@ -371,10 +348,7 @@ async def check_admin(bot: Bot, message: Message) -> bool:
 
 async def build_menu_text(chat_id: int, target_user: User | None = None) -> str:
     roles = await db.get_all_roles(chat_id)
-    total_members = 0
-    for r in roles:
-        members = await db.get_role_members(chat_id, r)
-        total_members += len(members)
+    unique_members = await db.get_chat_unique_users_count(chat_id)
 
     user_str = ""
     if target_user:
@@ -386,9 +360,30 @@ async def build_menu_text(chat_id: int, target_user: User | None = None) -> str:
         "────────────────────────\n"
         "<blockquote>📊 <b>Статистика группы:</b>\n"
         f"• Активных ролей: <b>{len(roles)}</b>\n"
-        f"• Участников: <b>{total_members}</b></blockquote>\n\n"
+        f"• Участников: <b>{unique_members}</b></blockquote>\n\n"
         "<i>Используйте панель управления ниже или откройте Mini App:</i>"
     )
+
+async def build_roles_list_html(chat_id: int) -> str:
+    """Генерирует HTML список ролей и участников за 1 запрос к БД."""
+    roles_with_members = await db.get_roles_with_members(chat_id)
+    if not roles_with_members:
+        return (
+            "📋 <b>Список ролей группы:</b>\n\n"
+            "<i>В этой группе пока нет ролей.</i>\n\n"
+            "Администратор может создать роль: <code>/create &lt;название&gt;</code>"
+        )
+    lines = ["📋 <b>Список ролей группы:</b>\n"]
+    for r in roles_with_members:
+        emoji = r.get("emoji", "🛡️")
+        name = r["name"]
+        members = r.get("members", [])
+        if members:
+            m_names = ", ".join(format_user_mention(uid, uname) for uid, uname in members)
+            lines.append(f"{emoji} <b>{html.escape(name)}</b> ({len(members)}):\n<blockquote>{m_names}</blockquote>")
+        else:
+            lines.append(f"{emoji} <b>{html.escape(name)}</b> <i>(нет участников)</i>")
+    return "\n".join(lines)
 
 @router.message(CommandStart())
 async def start_cmd(message: Message, command: CommandObject):
@@ -398,26 +393,13 @@ async def start_cmd(message: Message, command: CommandObject):
     if command.args and command.args.startswith("menu_"):
         try:
             target_chat_id = int(command.args[5:])
-            roles = await db.get_all_roles(target_chat_id)
-            total_members = 0
-            for r in roles:
-                members = await db.get_role_members(target_chat_id, r)
-                total_members += len(members)
-
-            bot_info = await message.bot.get_me()
             html_text = await build_menu_text(target_chat_id, target_user=message.from_user)
             keyboard = get_main_menu_keyboard(
                 target_chat_id,
                 is_private=True,
-                owner_id=message.from_user.id,
-                bot_username=bot_info.username
+                owner_id=message.from_user.id
             )
-            rich_blocks = [
-                {"type": "heading", "text": "🛡️ Управление Ролями (ЛС)", "size": 2},
-                {"type": "paragraph", "text": f"📊 Статистика группы:\n• Активных ролей: {len(roles)}\n• Участников: {total_members}"},
-                {"type": "footer", "text": "Приватная панель управления группой"}
-            ]
-            await send_smart_message(message.bot, chat_id, html_text, reply_markup=keyboard, rich_blocks=rich_blocks)
+            await send_smart_message(message.bot, chat_id, html_text, reply_markup=keyboard)
             return
         except Exception as e:
             logging.error(f"Error opening menu in PM: {e}")
@@ -443,6 +425,7 @@ async def start_cmd(message: Message, command: CommandObject):
         
         if res == "success":
             await message.reply(f"🎉 Вы вступили в роль 🛡️ <b>{html.escape(role_name)}</b>!", parse_mode=ParseMode.HTML)
+            await process_join_achievements(message.bot, target_chat_id, user.id)
             return
         elif res == "already_in":
             await message.reply(f"ℹ️ Вы уже состоите в роли <b>{html.escape(role_name)}</b>.", parse_mode=ParseMode.HTML)
@@ -451,36 +434,12 @@ async def start_cmd(message: Message, command: CommandObject):
             await message.reply(f"❌ Роль <b>{html.escape(role_name)}</b> не найдена в этой группе.", parse_mode=ParseMode.HTML)
             return
 
-    roles = await db.get_all_roles(chat_id)
-    try:
-        total_members = await message.bot.get_chat_member_count(chat_id)
-    except Exception:
-        total_members = len(await db.get_all_chat_users(chat_id))
-
-    bot_info = await message.bot.get_me()
     html_text = await build_menu_text(chat_id, target_user=message.from_user)
     keyboard = get_main_menu_keyboard(
         chat_id,
         is_private=is_priv,
-        owner_id=message.from_user.id if message.from_user else None,
-        bot_username=bot_info.username
+        owner_id=message.from_user.id if message.from_user else None
     )
-
-    rich_blocks = [
-        {
-            "type": "heading",
-            "text": "🛡️ Управление Ролями",
-            "size": 2
-        },
-        {
-            "type": "paragraph",
-            "text": f"📊 Статистика группы:\n• Активных ролей: {len(roles)}\n• Участников: {total_members}"
-        },
-        {
-            "type": "footer",
-            "text": "Используйте панель управления ниже или откройте Mini App"
-        }
-    ]
 
     if not is_priv:
         asyncio.create_task(sync_chat_administrators(message.bot, chat_id))
@@ -490,7 +449,6 @@ async def start_cmd(message: Message, command: CommandObject):
         chat_id, 
         html_text, 
         reply_markup=keyboard, 
-        rich_blocks=rich_blocks,
         receiver_user_id=message.from_user.id if not is_priv and message.from_user else None
     )
     if not is_priv and message.from_user:
@@ -513,76 +471,24 @@ async def help_cmd(message: Message):
 
     if not is_priv:
         asyncio.create_task(sync_chat_administrators(message.bot, chat_id))
-    roles = await db.get_all_roles(chat_id)
-    total_members = 0
-    for r in roles:
-        members = await db.get_role_members(chat_id, r)
-        total_members += len(members)
 
-    bot_info = await message.bot.get_me()
     html_text = await build_menu_text(chat_id, target_user=user)
     keyboard = get_main_menu_keyboard(
         chat_id,
         is_private=is_priv,
-        owner_id=owner_id,
-        bot_username=bot_info.username
+        owner_id=owner_id
     )
-
-    user_title = f" (для @{user.username})" if user and user.username else ""
-    rich_blocks = [
-        {
-            "type": "heading",
-            "text": f"🛡️ Управление Ролями{user_title}",
-            "size": 2
-        },
-        {
-            "type": "paragraph",
-            "text": f"📊 Статистика группы:\n• Активных ролей: {len(roles)}\n• Участников: {total_members}"
-        },
-        {
-            "type": "footer",
-            "text": "Используйте панель управления ниже или откройте Mini App"
-        }
-    ]
 
     sent_msg = await send_smart_message(
         message.bot, 
         chat_id, 
         html_text, 
         reply_markup=keyboard, 
-        rich_blocks=rich_blocks,
         receiver_user_id=owner_id if not is_priv else None
     )
     if not is_priv and owner_id:
         if sent_msg and hasattr(sent_msg, 'message_id'):
             await menu_tracker.register_menu(message.bot, chat_id, owner_id, sent_msg.message_id, auto_close_delay=TIMEOUT_MENU)
-
-async def build_roles_rich_blocks(chat_id: int, roles_data: list) -> list:
-    if not roles_data:
-        return [{"type": "paragraph", "text": "📋 В этой группе пока нет ролей.\n\nАдминистратор может создать роль командой /create <название>"}]
-
-    list_items = []
-    for r_info in roles_data:
-        role_name = r_info["name"]
-        emoji = r_info["emoji"]
-        members = await db.get_role_members(chat_id, role_name)
-        
-        if members:
-            m_list = [{"blocks": [{"type": "paragraph", "text": uname.lstrip('@')}]} for _, uname in members]
-            details_block = {
-                "type": "details",
-                "summary": f"{emoji} {role_name} ({len(members)} чел.)",
-                "blocks": [{"type": "list", "items": m_list}]
-            }
-            list_items.append({"blocks": [details_block]})
-        else:
-            list_items.append({"blocks": [{"type": "paragraph", "text": f"{emoji} {role_name} (участников нет)"}]})
-
-    return [
-        {"type": "heading", "text": "📋 Список Ролей Группы", "size": 2},
-        {"type": "divider"},
-        {"type": "list", "items": list_items}
-    ]
 
 async def safe_answer(query: CallbackQuery, text: str | None = None):
     try:
@@ -591,7 +497,7 @@ async def safe_answer(query: CallbackQuery, text: str | None = None):
         pass
 
 async def check_menu_access(query: CallbackQuery, owner_id: int | None = None) -> bool:
-    """Функционал эксклюзивного доступа вырезан: любой участник чата может взаимодействовать с меню."""
+    """Любой участник чата может взаимодействовать с меню."""
     return True
 
 @router.callback_query(F.data.startswith("cb:menu:"))
@@ -600,26 +506,15 @@ async def cb_menu(query: CallbackQuery):
     chat_id = int(parts[2])
     owner_id = int(parts[3]) if len(parts) > 3 and (parts[3].isdigit() or (parts[3].startswith("-") and parts[3][1:].isdigit())) else None
 
-    is_priv = (query.message.chat.type == ChatType.PRIVATE)
-    bot_info = await query.bot.get_me()
+    is_priv = (query.message.chat.type == ChatType.PRIVATE) if query.message else False
     text = await build_menu_text(chat_id, target_user=query.from_user)
-    keyboard = get_main_menu_keyboard(chat_id, is_private=is_priv, owner_id=owner_id, bot_username=bot_info.username)
-    roles = await db.get_all_roles(chat_id)
-    total_members = 0
-    for r in roles:
-        members = await db.get_role_members(chat_id, r)
-        total_members += len(members)
+    keyboard = get_main_menu_keyboard(chat_id, is_private=is_priv, owner_id=owner_id)
 
-    user_title = f" (для @{query.from_user.username})" if query.from_user and query.from_user.username else ""
-    rich_blocks = [
-        {"type": "heading", "text": f"🛡️ Управление Ролями{user_title}", "size": 2},
-        {"type": "paragraph", "text": f"📊 Статистика группы:\n• Активных ролей: {len(roles)}\n• Участников: {total_members}"},
-        {"type": "footer", "text": "Используйте панель управления ниже или откройте Mini App"}
-    ]
-    try:
-        await edit_smart_message(query.message.bot, chat_id, query.message.message_id, text, reply_markup=keyboard, rich_blocks=rich_blocks, receiver_user_id=owner_id or query.from_user.id)
-    except Exception:
-        pass
+    if query.message:
+        try:
+            await edit_smart_message(query.message.bot, chat_id, query.message.message_id, text, reply_markup=keyboard, receiver_user_id=owner_id or query.from_user.id)
+        except Exception:
+            pass
     await safe_answer(query, "Обновлено")
 
 @router.callback_query(F.data.startswith("cb:list:"))
@@ -628,173 +523,73 @@ async def cb_list(query: CallbackQuery):
     chat_id = int(parts[2])
     owner_id = int(parts[3]) if len(parts) > 3 and (parts[3].isdigit() or (parts[3].startswith("-") and parts[3][1:].isdigit())) else None
 
-    roles_data = await db.get_all_roles_with_details(chat_id)
-    is_priv = (query.message.chat.type == ChatType.PRIVATE)
-    rich_blocks = await build_roles_rich_blocks(chat_id, roles_data)
-    bot_info = await query.bot.get_me()
-    keyboard = get_back_keyboard(chat_id, is_private=is_priv, owner_id=owner_id, bot_username=bot_info.username)
-    try:
-        await edit_smart_message(query.message.bot, chat_id, query.message.message_id, "", reply_markup=keyboard, rich_blocks=rich_blocks, receiver_user_id=owner_id or query.from_user.id)
-    except Exception:
-        pass
+    is_priv = (query.message.chat.type == ChatType.PRIVATE) if query.message else False
+    html_text = await build_roles_list_html(chat_id)
+    keyboard = get_back_keyboard(chat_id, is_private=is_priv, owner_id=owner_id)
+
+    if query.message:
+        try:
+            await edit_smart_message(query.message.bot, chat_id, query.message.message_id, html_text, reply_markup=keyboard, receiver_user_id=owner_id or query.from_user.id)
+        except Exception:
+            pass
     await safe_answer(query)
 
-@router.callback_query(F.data == "cb:how_join")
-async def cb_how_join(query: CallbackQuery):
-    chat_id = query.message.chat.id
-    rich_blocks = [
-        {"type": "heading", "text": "➕ Управление Участием", "size": 2},
-        {"type": "blockquote", "text": "Управлять ролями удобнее всего в Mini App по кнопке ниже."},
-        {"type": "paragraph", "text": "Команды в чате:"},
-        {"type": "list", "items": [
-            {"blocks": [{"type": "paragraph", "text": "/join <роль> — Вступить в роль"}]},
-            {"blocks": [{"type": "paragraph", "text": "/leave <роль> — Выйти из роли"}]},
-            {"blocks": [{"type": "paragraph", "text": "/<роль> — Позвать участников роли"}]}
-        ]}
-    ]
-    keyboard = get_back_keyboard(chat_id)
-    try:
-        await edit_smart_message(query.message.bot, chat_id, query.message.message_id, "", reply_markup=keyboard, rich_blocks=rich_blocks, receiver_user_id=query.from_user.id)
-    except Exception:
-        pass
-    await safe_answer(query)
-
-@router.callback_query(F.data == "cb:help_unified")
 @router.callback_query(F.data.startswith("cb:help:"))
 async def cb_help_unified(query: CallbackQuery):
-    chat_id = query.message.chat.id
-    owner_id = None
-    if query.data.startswith("cb:help:"):
-        parts = query.data.split(":")
-        chat_id = int(parts[2])
-        if len(parts) > 3 and (parts[3].isdigit() or (parts[3].startswith("-") and parts[3][1:].isdigit())):
-            owner_id = int(parts[3])
+    parts = query.data.split(":")
+    chat_id = int(parts[2])
+    owner_id = int(parts[3]) if len(parts) > 3 and (parts[3].isdigit() or (parts[3].startswith("-") and parts[3][1:].isdigit())) else None
 
-    is_priv = (query.message.chat.type == ChatType.PRIVATE)
-    bot_info = await query.bot.get_me()
-    bot_user = html.escape(bot_info.username)
+    is_priv = (query.message.chat.type == ChatType.PRIVATE) if query.message else False
+    bot_user = html.escape(get_bot_username())
     
-    rich_blocks = [
-        {"type": "heading", "text": "❓ Справка и Команды Бота", "size": 2},
-        {"type": "paragraph", "text": "👑 Администраторам:"},
-        {"type": "list", "items": [
-            {"blocks": [{"type": "paragraph", "text": "/create <роль> — Создать новую роль"}]},
-            {"blocks": [{"type": "paragraph", "text": "/delete <роль> — Удалить роль"}]},
-            {"blocks": [{"type": "paragraph", "text": "/add <роль> @user — Добавить участника"}]},
-            {"blocks": [{"type": "paragraph", "text": "/notify <роль> <текст> — Срочное уведомление"}]}
-        ]},
-        {"type": "paragraph", "text": "👥 Вызов участников:"},
-        {"type": "list", "items": [
-            {"blocks": [{"type": "paragraph", "text": "/all — Позвать ВСЕХ участников чата"}]},
-            {"blocks": [{"type": "paragraph", "text": "/<роль> — Позвать роль (напр. /dev)"}]},
-            {"blocks": [{"type": "paragraph", "text": "/join <роль> / /leave <роль> — Вступить/выйти"}]},
-            {"blocks": [{"type": "paragraph", "text": "/party [места] [цель] — Собрать группу"}]}
-        ]},
-        {"type": "paragraph", "text": "⚡ Inline-режим:\nВпишите в поле ввода любого чата:"},
-        {"type": "pre", "text": f"@{bot_user} dev\n@{bot_user} party"}
-    ]
-    keyboard = get_back_keyboard(chat_id, is_private=is_priv, owner_id=owner_id, bot_username=bot_info.username)
-    try:
-        await edit_smart_message(query.message.bot, chat_id, query.message.message_id, "", reply_markup=keyboard, rich_blocks=rich_blocks, receiver_user_id=owner_id or query.from_user.id)
-    except Exception:
-        pass
+    help_text = (
+        "❓ <b>Справка и Команды Бота:</b>\n\n"
+        "👑 <b>Администраторам:</b>\n"
+        "• <code>/create &lt;роль&gt;</code> — Создать новую роль\n"
+        "• <code>/delete &lt;роль&gt;</code> — Удалить роль\n"
+        "• <code>/add &lt;роль&gt; @user</code> — Добавить участника\n"
+        "• <code>/notify &lt;роль&gt; &lt;текст&gt;</code> — Срочное уведомление роли\n\n"
+        "👥 <b>Вызов участников:</b>\n"
+        "• <code>/all</code> — Позвать ВСЕХ участников чата\n"
+        "• <code>/&lt;роль&gt;</code> — Позвать роль (например, <code>/dev</code>)\n"
+        "• <code>/join &lt;роль&gt;</code> / <code>/leave &lt;роль&gt;</code> — Вступить/выйти\n"
+        "• <code>/party [места] [цель]</code> — Собрать группу\n\n"
+        f"⚡ <b>Inline-режим:</b>\n<code>@{bot_user} dev</code>"
+    )
+    keyboard = get_back_keyboard(chat_id, is_private=is_priv, owner_id=owner_id)
+    if query.message:
+        try:
+            await edit_smart_message(query.message.bot, chat_id, query.message.message_id, help_text, reply_markup=keyboard, receiver_user_id=owner_id or query.from_user.id)
+        except Exception:
+            pass
     await safe_answer(query)
 
 @router.callback_query(F.data.startswith("cb:close:"))
 async def cb_close(query: CallbackQuery):
-    # Мгновенно подтверждаем клик, снимая спиннер с кнопки
-    try:
-        await query.answer()
-    except Exception:
-        pass
+    await safe_answer(query)
 
-    real_chat_id = query.message.chat.id if query.message else None
+    chat_id = query.message.chat.id if query.message else None
     msg_id = query.message.message_id if query.message else None
+    user_id = query.from_user.id if query.from_user else 0
     eph_id = getattr(query.message, "ephemeral_message_id", None) if query.message else None
-    receiver_id = getattr(getattr(query.message, "receiver_user", None), "id", None) or query.from_user.id
 
-    # Извлекаем fallback chat_id из callback_data (cb:close:<chat_id>:<owner_id>)
-    data_chat_id = None
-    try:
-        parts = query.data.split(":")
-        if len(parts) > 2 and parts[2]:
-            data_chat_id = int(parts[2])
-    except Exception:
-        pass
-
-    target_chat_id = real_chat_id or data_chat_id
-
-    # 1. Отменяем автозакрытие меню в трекере
-    if target_chat_id:
-        if msg_id:
-            menu_tracker.cancel_menu_timer(target_chat_id, msg_id)
-        if eph_id:
-            menu_tracker.cancel_menu_timer(target_chat_id, eph_id)
-        if data_chat_id and data_chat_id != target_chat_id:
-            if msg_id:
-                menu_tracker.cancel_menu_timer(data_chat_id, msg_id)
-            if eph_id:
-                menu_tracker.cancel_menu_timer(data_chat_id, eph_id)
-
-    # 2. Мгновенно и полностью стираем сообщение меню из чата (поддерживая обычные и эфемерные сообщения)
-    deleted = False
-    eff_eph_id = eph_id or msg_id
-
-    # Способ 1: Нативное удаление эфемерного сообщения (если сообщение эфемерное "Видите только Вы")
-    if target_chat_id and eff_eph_id and receiver_id and hasattr(query.bot, "delete_ephemeral_message"):
+    if not chat_id:
         try:
-            await query.bot.delete_ephemeral_message(
-                chat_id=target_chat_id,
-                receiver_user_id=receiver_id,
-                ephemeral_message_id=eff_eph_id
-            )
-            deleted = True
-        except TelegramBadRequest as e:
-            if "message to delete not found" in str(e).lower():
-                deleted = True
-            else:
-                logging.debug(f"cb_close: delete_ephemeral_message bad request: {e}")
-        except Exception as e:
-            logging.debug(f"cb_close: delete_ephemeral_message exception: {e}")
+            parts = query.data.split(":")
+            if len(parts) > 2 and parts[2]:
+                chat_id = int(parts[2])
+        except Exception:
+            pass
 
-    # Способ 2: Прямой вызов aiogram query.message.delete()
-    if not deleted and query.message:
+    if query.message:
         try:
             await query.message.delete()
-            deleted = True
-        except TelegramBadRequest as e:
-            if "message to delete not found" in str(e).lower():
-                deleted = True
-            else:
-                logging.debug(f"cb_close: query.message.delete failed: {e}")
-        except Exception as e:
-            logging.debug(f"cb_close: query.message.delete exception: {e}")
+        except Exception:
+            pass
 
-    # Способ 3: Прямое удаление через bot.delete_message
-    if not deleted and target_chat_id and msg_id:
-        try:
-            await query.bot.delete_message(chat_id=target_chat_id, message_id=msg_id)
-            deleted = True
-        except TelegramBadRequest as e:
-            if "message to delete not found" in str(e).lower():
-                deleted = True
-            else:
-                logging.debug(f"cb_close: query.bot.delete_message failed: {e}")
-        except Exception as e:
-            logging.debug(f"cb_close: query.bot.delete_message exception: {e}")
-
-    # Способ 4: Безопасное удаление через cleaner (включая эфемерный фоллбэк)
-    if not deleted and target_chat_id and (msg_id or eff_eph_id):
-        try:
-            deleted = await _safe_delete_message(
-                query.bot, 
-                target_chat_id, 
-                msg_id or eff_eph_id, 
-                receiver_user_id=receiver_id,
-                ephemeral_message_id=eff_eph_id
-            )
-        except Exception as e:
-            logging.debug(f"cb_close: _safe_delete_message exception: {e}")
+    if chat_id and msg_id:
+        await menu_tracker.close_menu(query.bot, chat_id, user_id, msg_id, ephemeral_message_id=eph_id)
 
 
 
@@ -1019,23 +814,7 @@ async def join_role(message: Message, command: CommandObject):
 
     if result == "success":
         await reply_temp(message, f"🎉 Вы вступили в роль 🛡️ <b>{html.escape(role_name)}</b>!", delay=TIMEOUT_SUCCESS)
-        # Ачивки за вступление в роль
-        bot_obj = message.bot
-        await try_unlock_achievement(bot_obj, chat_id, user.id, "first_join")
-        # Мультикласс: если уже в 2+ ролях — даём при вступлении в третью
-        all_roles = await db.get_all_roles(chat_id)
-        user_role_count = 0
-        for r in all_roles:
-            members = await db.get_role_members(chat_id, r)
-            if any(m[0] == user.id for m in members):
-                user_role_count += 1
-        if user_role_count >= 3:
-            await try_unlock_achievement(bot_obj, chat_id, user.id, "multiclass")
-        # Ночная активность: 00:00–06:00 UTC
-        from datetime import datetime, timezone
-        hour = datetime.now(timezone.utc).hour
-        if 0 <= hour < 6:
-            await try_unlock_achievement(bot_obj, chat_id, user.id, "night_shift")
+        await process_join_achievements(message.bot, chat_id, user.id)
     elif result == "already_in":
         await reply_temp(message, f"ℹ️ Вы уже состоите в роли <b>{html.escape(role_name)}</b>.", delay=TIMEOUT_WARNING)
     elif result == "not_found":
@@ -1068,23 +847,20 @@ async def list_roles(message: Message):
     # Мгновенно удаляем команду пользователя
     if message.message_id:
         asyncio.create_task(_safe_delete_message(message.bot, chat_id, message.message_id, receiver_user_id=user_id))
-    roles_data = await db.get_all_roles_with_details(chat_id)
-    bot_info = await message.bot.get_me()
+    
+    html_text = await build_roles_list_html(chat_id)
     keyboard = get_main_menu_keyboard(
         chat_id,
         is_private=False,
-        owner_id=message.from_user.id if message.from_user else None,
-        bot_username=bot_info.username
+        owner_id=user_id
     )
 
-    rich_blocks = await build_roles_rich_blocks(chat_id, roles_data)
     sent_msg = await send_smart_message(
         message.bot, 
         chat_id, 
-        "📋 <b>Список ролей</b>", 
+        html_text, 
         reply_markup=keyboard, 
-        rich_blocks=rich_blocks,
-        receiver_user_id=message.from_user.id if message.from_user else None
+        receiver_user_id=user_id
     )
     if message.from_user:
         if sent_msg and hasattr(sent_msg, 'message_id'):
@@ -1105,9 +881,7 @@ async def send_custom_msg(message: Message, command: CommandObject, bot: Bot):
         if message.chat.type == ChatType.PRIVATE or not await check_admin(bot, message):
             await reply_temp(
                 message,
-                f"⛔ У вас нет доступа к этой команде.\n\n"
-                f"💡 <b>Ваш User ID:</b> <code>{message.from_user.id}</code>\n"
-                f"💡 <b>OWNER_ID в .env:</b> <code>{owner_id_env or 'не задан'}</code>",
+                "⛔ У вас нет доступа к этой команде.",
                 delay=TIMEOUT_WARNING
             )
             return
@@ -1425,7 +1199,7 @@ async def create_party_cmd(message: Message, command: CommandObject):
     party_data = await db.get_party(party_id)
     blocks, text, kb = format_party_message(party_data)
 
-    msg = await send_smart_message(message.bot, message.chat.id, text, reply_markup=kb, rich_blocks=blocks)
+    msg = await send_smart_message(message.bot, message.chat.id, text, reply_markup=kb)
     await db.set_party_message_id(party_id, msg.message_id)
     # Мгновенно удаляем команду пользователя из группы
     asyncio.create_task(_safe_delete_message(message.bot, message.chat.id, message.message_id))
@@ -1505,7 +1279,7 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
         if party_data and party_data.get("status") == "completed":
             blocks, completion_text, _ = format_party_message(party_data)
             try:
-                await send_smart_message(callback.message.bot, callback.message.chat.id, completion_text, rich_blocks=blocks)
+                await send_smart_message(callback.message.bot, callback.message.chat.id, completion_text)
                 # Удаляем интерактивную карточку набора, так как пати полностью собрана
                 if callback.message:
                     asyncio.create_task(_safe_delete_message(callback.bot, callback.message.chat.id, callback.message.message_id))
@@ -1661,7 +1435,7 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
     if party_data:
         blocks, text, kb = format_party_message(party_data)
         try:
-            await edit_smart_message(callback.message.bot, callback.message.chat.id, callback.message.message_id, text, reply_markup=kb, rich_blocks=blocks)
+            await edit_smart_message(callback.message.bot, callback.message.chat.id, callback.message.message_id, text, reply_markup=kb)
         except Exception:
             pass
 

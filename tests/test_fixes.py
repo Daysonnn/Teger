@@ -236,4 +236,21 @@ async def test_cb_close_ephemeral_message_deleted():
     )
 
 
+def test_api_auth_admin_protection(monkeypatch):
+    from aiohttp.test_utils import make_mocked_request
+    from api import check_admin_access
+
+    monkeypatch.setenv("OWNER_ID", "999888")
+    monkeypatch.setenv("TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
+
+    # 1. Запрос от злоумышленника: передает чужой OWNER_ID без подписи Telegram initData
+    mock_req = make_mocked_request("GET", "/api/admin/check?user_id=999888")
+    assert check_admin_access(mock_req, fallback_user_id=999888) is False
+
+    # 2. Запрос с некорректным заголовком initData
+    headers = {"X-Telegram-Init-Data": "query_id=1&user=%7B%22id%22%3A999888%7D&hash=invalid_fake_hash"}
+    mock_req_forged = make_mocked_request("GET", "/api/admin/check", headers=headers)
+    assert check_admin_access(mock_req_forged, fallback_user_id=999888) is False
+
+
 

@@ -7,7 +7,7 @@ from aiohttp import web, TCPConnector
 from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher
-from aiogram.types import BotCommand, MenuButtonWebApp, WebAppInfo
+from aiogram.types import BotCommand
 from aiogram.client.session.aiohttp import AiohttpSession
 
 import database as db
@@ -92,6 +92,13 @@ async def main():
 
     # Собираем список зарегистрированных команд для dynamic_role_call
     handlers._collect_known_commands()
+
+    try:
+        bot_info = await bot.get_me()
+        if bot_info and bot_info.username:
+            handlers.set_bot_username(bot_info.username)
+    except Exception as e:
+        logging.warning(f"Could not pre-fetch bot username: {e}")
 
     await setup_commands(bot)
     

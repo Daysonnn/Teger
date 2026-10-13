@@ -4,7 +4,7 @@ from typing import Optional
 from aiogram import Bot
 from aiogram.types import Message, InlineKeyboardMarkup
 from aiogram.enums import ChatType, ParseMode
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.exceptions import TelegramBadRequest
 
 from aiogram.methods.base import TelegramMethod
 
@@ -199,7 +199,14 @@ class ActiveMenuTracker:
                     t.cancel()
                 self._active_menus.pop(k, None)
 
-    async def close_menu(self, bot: Bot, chat_id: int, user_id: int, message_id: int) -> bool:
+    async def close_menu(
+        self,
+        bot: Bot,
+        chat_id: int,
+        user_id: int,
+        message_id: int,
+        ephemeral_message_id: Optional[int] = None
+    ) -> bool:
         """Закрывает и удаляет меню по запросу владельца."""
         key = (chat_id, user_id)
         if key in self._active_menus:
@@ -209,11 +216,9 @@ class ActiveMenuTracker:
             self._active_menus.pop(key, None)
 
         self.cancel_menu_timer(chat_id, message_id)
-        return await _safe_delete_message(bot, chat_id, message_id, receiver_user_id=user_id)
-
-    def is_owner(self, action_user_id: int, owner_id: int) -> bool:
-        """Проверяет, является ли пользователь владельцем меню."""
-        return action_user_id == owner_id
+        return await _safe_delete_message(
+            bot, chat_id, message_id, receiver_user_id=user_id, ephemeral_message_id=ephemeral_message_id
+        )
 
 
 # Глобальный инстанс трекера активных меню

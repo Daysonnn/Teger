@@ -54,3 +54,55 @@ async def test_join_and_leave_role():
 
     # Очистка
     await db.delete_role(chat_id, role_name)
+
+
+@pytest.mark.asyncio
+async def test_get_roles_with_members_and_unique_count():
+    await db.init_db()
+    chat_id = -10044332211
+    role_1 = "Designers"
+    role_2 = "Developers"
+
+    async with db.get_db() as conn:
+        await conn.execute("DELETE FROM chat_users WHERE chat_id = ?", (chat_id,))
+        await conn.execute("DELETE FROM roles WHERE chat_id = ?", (chat_id,))
+        await conn.commit()
+
+    await db.create_role(chat_id, role_1, emoji="🎨")
+    await db.create_role(chat_id, role_2, emoji="💻")
+
+    await db.join_role(chat_id, role_1, 101, "@alice")
+    await db.join_role(chat_id, role_2, 102, "@bob")
+    await db.join_role(chat_id, role_2, 101, "@alice")
+
+    # 1. Проверяем get_roles_with_members (1 запрос с JOIN)
+    roles_with_members = await db.get_roles_with_members(chat_id)
+    assert len(roles_with_members) == 2
+
+    roles_map = {r["name"]: r for r in roles_with_members}
+    assert "Designers" in roles_map
+    assert roles_map["Designers"]["emoji"] == "🎨"
+    assert len(roles_map["Designers"]["members"]) == 1
+    assert roles_map["Designers"]["members"][0][0] == 101
+
+    assert "Developers" in roles_map
+    assert roles_map["Developers"]["emoji"] == "💻"
+    assert len(roles_map["Developers"]["members"]) == 2
+
+    # 2. Проверяем подсчет уникальных пользователей чата
+    unique_count = await db.get_chat_unique_users_count(chat_id)
+    assert unique_count == 2  # @alice и @bob
+
+    # 3. Проверяем пакетную вставку record_chat_users_batch
+    batch_records = [
+        (chat_id, 201, "@user201"),
+        (chat_id, 202, "@user202"),
+        (chat_id, 203, "@user203"),
+    ]
+    await db.record_chat_users_batch(batch_records)
+    new_unique_count = await db.get_chat_unique_users_count(chat_id)
+    assert new_unique_count == 5
+
+    # Очистка
+    await db.delete_role(chat_id, role_1)
+    await db.delete_role(chat_id, role_2)

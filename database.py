@@ -1,6 +1,9 @@
+import logging
 import hashlib
 import aiosqlite
 from contextlib import asynccontextmanager
+
+logger = logging.getLogger(__name__)
 
 DB_NAME = 'roles_bot.db'
 _db_initialized = False
@@ -192,6 +195,21 @@ async def add_chat_user_by_username(chat_id: int, username: str) -> int:
     await record_chat_user(chat_id, synth_id, clean_un)
     return synth_id
 
+async def record_chat_users_batch(records: list[tuple[int, int, str]]):
+    """Массовая запись участников чата в одной транзакции (оптимизация для sync_members)."""
+    if not records:
+        return
+    try:
+        async with get_db() as conn:
+            await conn.executemany('''
+                INSERT INTO chat_users (chat_id, user_id, username)
+                VALUES (?, ?, ?)
+                ON CONFLICT(chat_id, user_id) DO UPDATE SET username=excluded.username
+            ''', records)
+            await conn.commit()
+    except Exception as e:
+        logger.warning(f"Error in record_chat_users_batch: {e}")
+
 async def add_audit_log(chat_id: int, user_id: int | None, username: str | None, action: str, details: str = ""):
     """Записывает действие в лог аудита чата."""
     try:
@@ -332,9 +350,11 @@ async def join_role(chat_id: int, role_name: str, user_id: int, username: str) -
                 (role_id, user_id, username)
             )
             await conn.commit()
-            return "success"
         except aiosqlite.IntegrityError:
             return "already_in"
+
+    await add_audit_log(chat_id, user_id, username, "Вступил в роль", f"Роль: {role_name}")
+    return "success"
 
 async def leave_role(chat_id: int, role_name: str, user_id: int) -> bool:
     async with get_db() as conn:
@@ -382,6 +402,51 @@ async def get_role_members(chat_id: int, role_name: str) -> list[tuple[int, str]
         ''', (chat_id, role_name))
         rows = await cursor.fetchall()
         return rows
+
+async def get_roles_with_members(chat_id: int) -> list[dict]:
+    """
+    Возвращает все роли чата со списками их участников за один SQL-запрос с JOIN.
+    Решает проблему N+1 запросов при рендере меню ролей и отдаче списков в API.
+    """
+    async with get_db() as conn:
+        cursor = await conn.execute('''
+            SELECT r.id, r.name, COALESCE(r.emoji, '🛡️'), m.user_id, m.username
+            FROM roles r
+            LEFT JOIN members m ON r.id = m.role_id
+            WHERE r.chat_id = ?
+            ORDER BY r.name, m.user_id DESC
+        ''', (chat_id,))
+        rows = await cursor.fetchall()
+
+        roles_dict: dict[int, dict] = {}
+        for r_id, r_name, r_emoji, uid, uname in rows:
+            if r_id not in roles_dict:
+                roles_dict[r_id] = {
+                    "id": r_id,
+                    "name": r_name,
+                    "emoji": r_emoji,
+                    "members": []
+                }
+            if uid is not None:
+                members_list = roles_dict[r_id]["members"]
+                clean_uname = uname or f"User {uid}"
+                if not any(m[0] == uid or (m[1] and clean_uname and m[1].lower() == clean_uname.lower()) for m in members_list):
+                    members_list.append((uid, clean_uname))
+
+        return list(roles_dict.values())
+
+async def get_chat_unique_users_count(chat_id: int) -> int:
+    """Возвращает точное число уникальных участников чата (из chat_users и ролей)."""
+    async with get_db() as conn:
+        cursor = await conn.execute('''
+            SELECT COUNT(DISTINCT uid) FROM (
+                SELECT user_id AS uid FROM chat_users WHERE chat_id = ?
+                UNION
+                SELECT m.user_id AS uid FROM members m JOIN roles r ON m.role_id = r.id WHERE r.chat_id = ?
+            ) WHERE uid IS NOT NULL
+        ''', (chat_id, chat_id))
+        row = await cursor.fetchone()
+        return row[0] if row else 0
 
 async def get_all_chat_ids() -> list[int]:
     """Возвращает список всех известных уникальных chat_id из базы."""

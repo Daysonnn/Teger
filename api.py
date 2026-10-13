@@ -2,7 +2,35 @@ import os
 import re
 import logging
 from aiohttp import web
+from aiogram.utils.web_app import safe_parse_webapp_init_data
 import database as db
+
+def get_authenticated_user(request: web.Request) -> dict | None:
+    """
+    Валидирует заголовок X-Telegram-Init-Data с криптографической проверкой HMAC-SHA256 через токен бота.
+    Возвращает словарь с проверенными данными пользователя Telegram Mini App или None.
+    """
+    init_data = request.headers.get("X-Telegram-Init-Data") or request.query.get("init_data")
+    if not init_data:
+        return None
+
+    bot = request.app.get("bot")
+    token = bot.token if bot else os.getenv("TOKEN")
+    if not token:
+        return None
+
+    try:
+        parsed = safe_parse_webapp_init_data(token, init_data)
+        if parsed.user:
+            return {
+                "id": parsed.user.id,
+                "first_name": parsed.user.first_name,
+                "username": parsed.user.username,
+                "is_bot": parsed.user.is_bot
+            }
+    except Exception as e:
+        logging.debug(f"InitData signature validation failed: {e}")
+    return None
 
 def check_is_owner(user_id: int | str | None) -> bool:
     owner_id_env = os.getenv("OWNER_ID")
@@ -13,6 +41,21 @@ def check_is_owner(user_id: int | str | None) -> bool:
     except (ValueError, TypeError):
         return False
 
+def check_admin_access(request: web.Request, fallback_user_id: any = None) -> bool:
+    """
+    Проверяет права владельца бота.
+    Сначала проверяет криптографическую подпись initData Telegram Mini App (HMAC-SHA256).
+    Если initData не передан, fallback_user_id принимается только при отсутствии конфигурации токена (например, в моках/тестах).
+    """
+    auth_user = get_authenticated_user(request)
+    if auth_user:
+        return check_is_owner(auth_user.get("id"))
+    bot = request.app.get("bot")
+    token = bot.token if bot else os.getenv("TOKEN")
+    if not token and fallback_user_id:
+        return check_is_owner(fallback_user_id)
+    return False
+
 async def handle_get_roles(request: web.Request):
     chat_id = request.query.get("chat_id")
     if not chat_id:
@@ -22,8 +65,9 @@ async def handle_get_roles(request: web.Request):
         chat_id = int(chat_id)
 
         # Автоматическая фиксация участника в БД чата при открытии Mini App
-        user_id = request.query.get("user_id")
-        username = request.query.get("username")
+        auth_user = get_authenticated_user(request)
+        user_id = auth_user["id"] if auth_user else request.query.get("user_id")
+        username = (f"@{auth_user['username']}" if auth_user.get("username") else auth_user.get("first_name")) if auth_user else request.query.get("username")
         if user_id:
             try:
                 uid_int = int(user_id)
@@ -33,18 +77,16 @@ async def handle_get_roles(request: web.Request):
             except (ValueError, TypeError):
                 pass
 
-        roles_with_emoji = await db.get_all_roles_with_details(chat_id)
-        roles_data = []
-        
-        for role_info in roles_with_emoji:
-            role_name = role_info["name"]
-            members = await db.get_role_members(chat_id, role_name)
-            members_list = [{"user_id": uid, "username": uname} for uid, uname in members]
-            roles_data.append({
-                "name": role_name,
-                "emoji": role_info["emoji"],
-                "members": members_list
-            })
+        # Получаем все роли со списками участников за 1 SQL запрос с JOIN
+        roles_with_members = await db.get_roles_with_members(chat_id)
+        roles_data = [
+            {
+                "name": r["name"],
+                "emoji": r["emoji"],
+                "members": [{"user_id": uid, "username": uname} for uid, uname in r.get("members", [])]
+            }
+            for r in roles_with_members
+        ]
             
         return web.json_response({"roles": roles_data})
     except Exception as e:
@@ -55,8 +97,10 @@ async def handle_join_role(request: web.Request):
     data = await request.json()
     chat_id = data.get("chat_id")
     role_name = data.get("role_name")
-    user_id = data.get("user_id")
-    username = data.get("username")
+    
+    auth_user = get_authenticated_user(request)
+    user_id = auth_user["id"] if auth_user else data.get("user_id")
+    username = (f"@{auth_user['username']}" if auth_user.get("username") else auth_user.get("first_name")) if auth_user else data.get("username")
 
     if not chat_id or not role_name or (not user_id and not username):
         return web.json_response({"error": "Missing fields"}, status=400)
@@ -67,31 +111,19 @@ async def handle_join_role(request: web.Request):
         username = clean_un
 
     result = await db.join_role(int(chat_id), role_name, int(user_id), username or str(user_id))
-    if result == "success":
-        await db.add_audit_log(int(chat_id), int(user_id), username, "Вступил/Добавлен в роль", f"Роль: {role_name}")
-        # Ачивки через Mini App (без bot объекта — только запись в БД, уведомление придёт при следующей активности)
-        if user_id and int(user_id) > 0:
-            uid_int = int(user_id)
-            await db.unlock_achievement(int(chat_id), uid_int, "first_join")
-            # Мультикласс
-            all_roles = await db.get_all_roles(int(chat_id))
-            user_role_count = 0
-            for r in all_roles:
-                members = await db.get_role_members(int(chat_id), r)
-                if any(m[0] == uid_int for m in members):
-                    user_role_count += 1
-            if user_role_count >= 3:
-                await db.unlock_achievement(int(chat_id), uid_int, "multiclass")
-            from datetime import datetime, timezone
-            if 0 <= datetime.now(timezone.utc).hour < 6:
-                await db.unlock_achievement(int(chat_id), uid_int, "night_shift")
+    if result == "success" and user_id and int(user_id) > 0:
+        bot = request.app.get("bot")
+        import handlers
+        await handlers.process_join_achievements(bot, int(chat_id), int(user_id))
+
     return web.json_response({"status": result})
 
 async def handle_leave_role(request: web.Request):
     data = await request.json()
     chat_id = data.get("chat_id")
     role_name = data.get("role_name")
-    user_id = data.get("user_id")
+    auth_user = get_authenticated_user(request)
+    user_id = auth_user["id"] if auth_user else data.get("user_id")
 
     if not all([chat_id, role_name, user_id]):
         return web.json_response({"error": "Missing fields"}, status=400)
@@ -172,25 +204,29 @@ async def handle_get_chat_members(request: web.Request):
         if not members and bot:
             try:
                 admins = await bot.get_chat_administrators(chat_id_int)
+                admin_records = []
                 for adm in admins:
                     if not adm.user.is_bot:
                         un = f"@{adm.user.username}" if adm.user.username else adm.user.first_name
-                        await db.record_chat_user(chat_id_int, adm.user.id, un)
+                        admin_records.append((chat_id_int, adm.user.id, un))
+                if admin_records:
+                    await db.record_chat_users_batch(admin_records)
                 members = await db.get_all_chat_users(chat_id_int)
             except Exception as e:
                 logging.error(f"Auto-sync admins failed in handle_get_chat_members: {e}")
         
-        roles = await db.get_all_roles(chat_id_int)
+        # Получаем все роли и участников за 1 SQL запрос с JOIN (избегаем N+1 проблемы)
+        roles_with_members = await db.get_roles_with_members(chat_id_int)
         user_roles_map = {}
-        for r in roles:
-            r_members = await db.get_role_members(chat_id_int, r)
-            for uid, uname in r_members:
+        for r_info in roles_with_members:
+            r_name = r_info["name"]
+            for uid, uname in r_info.get("members", []):
                 key = uid if uid else (uname.lower() if uname else None)
                 if key:
                     if key not in user_roles_map:
                         user_roles_map[key] = []
-                    if r not in user_roles_map[key]:
-                        user_roles_map[key].append(r)
+                    if r_name not in user_roles_map[key]:
+                        user_roles_map[key].append(r_name)
                 
         result = []
         seen_keys = set()
@@ -222,13 +258,14 @@ async def handle_sync_chat_members(request: web.Request):
     try:
         chat_id_int = int(chat_id)
         admins = await bot.get_chat_administrators(chat_id_int)
-        synced = 0
+        records = []
         for adm in admins:
             if not adm.user.is_bot:
                 un = f"@{adm.user.username}" if adm.user.username else adm.user.first_name
-                await db.record_chat_user(chat_id_int, adm.user.id, un)
-                synced += 1
-        return web.json_response({"status": "success", "synced": synced})
+                records.append((chat_id_int, adm.user.id, un))
+        if records:
+            await db.record_chat_users_batch(records)
+        return web.json_response({"status": "success", "synced": len(records)})
     except Exception as e:
         logging.error(f"Error syncing chat members in API: {e}")
         return web.json_response({"error": str(e)}, status=500)
@@ -274,7 +311,7 @@ async def handle_get_audit_logs(request: web.Request):
 
 async def handle_admin_check(request: web.Request):
     user_id = request.query.get("user_id")
-    is_owner = check_is_owner(user_id)
+    is_owner = check_admin_access(request, user_id)
     return web.json_response({
         "is_owner": is_owner
     })
@@ -287,7 +324,7 @@ async def handle_admin_send(request: web.Request):
         message_text = data.get("message")
         is_global = data.get("is_global", False)
 
-        if not check_is_owner(user_id):
+        if not check_admin_access(request, user_id):
             return web.json_response({"error": "⛔ Доступ запрещен. Только для владельца бота."}, status=403)
 
         if not message_text:
@@ -339,7 +376,7 @@ async def handle_admin_send(request: web.Request):
 
 async def handle_admin_stats(request: web.Request):
     user_id = request.query.get("user_id")
-    if not check_is_owner(user_id):
+    if not check_admin_access(request, user_id):
         return web.json_response({"error": "Доступ запрещен"}, status=403)
     
     try:
