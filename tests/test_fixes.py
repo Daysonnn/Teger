@@ -63,11 +63,11 @@ async def test_format_party_message_structure():
         "members": [{"user_id": 999, "username": "@captain"}]
     }
 
-    # Должен возвращать 3 значения: blocks, text, kb
+    # Должен возвращать 2 значения: text, kb
     res = format_party_message(party_data)
     assert isinstance(res, tuple)
-    assert len(res) == 3
-    blocks, text, kb = res
+    assert len(res) == 2
+    text, kb = res
     assert "Dota 2 Stack" in text
     assert kb is not None
 
@@ -116,6 +116,7 @@ async def test_cb_close_deletes_message():
     mock_query.from_user = MagicMock(spec=User)
     mock_query.from_user.id = 12345
     mock_query.bot = MagicMock()
+    mock_query.bot.delete_message = AsyncMock(return_value=True)
     mock_query.answer = AsyncMock()
 
     mock_msg = MagicMock(spec=Message)
@@ -123,13 +124,12 @@ async def test_cb_close_deletes_message():
     mock_msg.chat = MagicMock(spec=Chat)
     mock_msg.chat.id = -100999888
     mock_msg.chat.type = ChatType.SUPERGROUP
-    mock_msg.delete = AsyncMock(return_value=True)
     mock_query.message = mock_msg
 
     await cb_close(mock_query)
 
-    # Проверяем, что сообщение было удалено
-    mock_msg.delete.assert_called_once()
+    # Проверяем, что menu_tracker вызвал delete_message у бота
+    mock_query.bot.delete_message.assert_called_once_with(chat_id=-100999888, message_id=999)
     # Проверяем, что answer вызван без раздражающего текста тоста
     assert mock_query.answer.call_args[1].get("text") is None
 
@@ -160,7 +160,7 @@ async def test_cb_close_allowed_for_any_user():
     await cb_close(mock_query)
 
     # Сообщение меню должно быть удалено без отказа и без редактирования текста
-    assert mock_query.bot.delete_message.called or mock_msg.delete.called
+    assert mock_query.bot.delete_message.called
     assert not mock_msg.edit_text.called
 
 
@@ -176,6 +176,7 @@ async def test_cb_close_cancels_timer_and_never_edits_text():
 
     # Регистрируем меню в трекере
     mock_bot = MagicMock()
+    mock_bot.delete_message = AsyncMock(return_value=True)
     await menu_tracker.register_menu(mock_bot, chat_id, user_id, msg_id, auto_close_delay=120.0)
     assert (chat_id, user_id) in menu_tracker._active_menus
 
@@ -198,8 +199,8 @@ async def test_cb_close_cancels_timer_and_never_edits_text():
 
     # Меню снято с автозакрытия
     assert (chat_id, user_id) not in menu_tracker._active_menus
-    # Сообщение удалено
-    mock_msg.delete.assert_called_once()
+    # Сообщение удалено через delete_message бота
+    mock_bot.delete_message.assert_called_once_with(chat_id=chat_id, message_id=msg_id)
     # edit_text НЕ вызван
     assert not mock_msg.edit_text.called
 
@@ -251,6 +252,42 @@ def test_api_auth_admin_protection(monkeypatch):
     headers = {"X-Telegram-Init-Data": "query_id=1&user=%7B%22id%22%3A999888%7D&hash=invalid_fake_hash"}
     mock_req_forged = make_mocked_request("GET", "/api/admin/check", headers=headers)
     assert check_admin_access(mock_req_forged, fallback_user_id=999888) is False
+
+
+@pytest.mark.asyncio
+async def test_join_role_already_in_returns_status():
+    chat_id = -100777111
+    role_name = "Testers"
+    user_id = 998811
+    username = "@testerguy"
+
+    await db.init_db()
+    async with db.get_db() as conn:
+        await conn.execute("DELETE FROM roles WHERE chat_id = ?", (chat_id,))
+        await conn.execute("DELETE FROM members WHERE user_id = ?", (user_id,))
+        await conn.commit()
+
+    await db.create_role(chat_id, role_name)
+    r1 = await db.join_role(chat_id, role_name, user_id, username)
+    assert r1 == "success"
+
+    # Повторный вызов должен возвращать already_in, а не success!
+    r2 = await db.join_role(chat_id, role_name, user_id, username)
+    assert r2 == "already_in"
+
+    # Очистка
+    await db.delete_role(chat_id, role_name)
+
+
+def test_mutating_api_endpoints_blocked_without_initdata(monkeypatch):
+    from aiohttp.test_utils import make_mocked_request
+    from api import get_request_user
+
+    monkeypatch.setenv("TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
+
+    # Злоумышленник посылает чужой user_id без initData подписи
+    req = make_mocked_request("POST", "/api/create")
+    assert get_request_user(req, fallback_user={"id": 12345}) is None
 
 
 

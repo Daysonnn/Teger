@@ -1,13 +1,11 @@
 import os
 import html
-import time
 import asyncio
 import logging
 from aiogram import Router, F, Bot, BaseMiddleware
 from aiogram.enums import ChatType, ParseMode
 from aiogram.filters import CommandObject, Command, CommandStart
 from aiogram.filters.chat_member_updated import ChatMemberUpdatedFilter, JOIN_TRANSITION
-from aiogram.methods.base import TelegramMethod
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo,
     InlineQuery, InlineQueryResultArticle, InputTextMessageContent, User, ChatMemberUpdated
@@ -29,13 +27,14 @@ async def sync_chat_administrators(bot: Bot, chat_id: int) -> int:
     """Синхронизирует всех администраторов чата в таблицу chat_users."""
     try:
         admins = await bot.get_chat_administrators(chat_id)
-        count = 0
+        records = []
         for admin in admins:
             if not admin.user.is_bot:
                 uname = f"@{admin.user.username}" if admin.user.username else admin.user.first_name
-                await db.record_chat_user(chat_id, admin.user.id, uname)
-                count += 1
-        return count
+                records.append((chat_id, admin.user.id, uname))
+        if records:
+            await db.record_chat_users_batch(records)
+        return len(records)
     except Exception as e:
         logging.error(f"Error syncing chat administrators for {chat_id}: {e}")
         return 0
@@ -496,10 +495,6 @@ async def safe_answer(query: CallbackQuery, text: str | None = None):
     except Exception:
         pass
 
-async def check_menu_access(query: CallbackQuery, owner_id: int | None = None) -> bool:
-    """Любой участник чата может взаимодействовать с меню."""
-    return True
-
 @router.callback_query(F.data.startswith("cb:menu:"))
 async def cb_menu(query: CallbackQuery):
     parts = query.data.split(":")
@@ -579,12 +574,6 @@ async def cb_close(query: CallbackQuery):
             parts = query.data.split(":")
             if len(parts) > 2 and parts[2]:
                 chat_id = int(parts[2])
-        except Exception:
-            pass
-
-    if query.message:
-        try:
-            await query.message.delete()
         except Exception:
             pass
 
@@ -758,12 +747,11 @@ async def create_role(message: Message, command: CommandObject, bot: Bot):
     chat_id = message.chat.id
 
     if await db.create_role(chat_id, role_name):
-        bot_info = await bot.get_me()
         keyboard = get_main_menu_keyboard(
             chat_id,
             is_private=False,
             owner_id=message.from_user.id if message.from_user else None,
-            bot_username=bot_info.username
+            bot_username=get_bot_username()
         )
         await reply_temp(
             message,
@@ -1070,7 +1058,7 @@ async def call_all_members(message: Message, bot: Bot):
             await message.answer(f"<blockquote>{chunk_mentions}</blockquote>", parse_mode=ParseMode.HTML)
             await asyncio.sleep(0.6)
 
-def format_party_message(party: dict) -> tuple[list | None, str, InlineKeyboardMarkup | None]:
+def format_party_message(party: dict) -> tuple[str, InlineKeyboardMarkup | None]:
     """Форматирует динамически обновляемое сообщение сбора пати."""
     title = html.escape(party["title"])
     creator_name = html.escape(party["creator_name"])
@@ -1081,11 +1069,7 @@ def format_party_message(party: dict) -> tuple[list | None, str, InlineKeyboardM
 
     if status == "cancelled":
         text = f"<b>Сбор группы отменен</b>\n\n<b>Цель:</b> {title}\n<b>Организатор:</b> {creator_name}"
-        blocks = [
-            {"type": "heading", "text": "❌ Сбор отменен", "size": 2},
-            {"type": "paragraph", "text": f"Цель: {party['title']}\nОрганизатор: {party['creator_name']}"}
-        ]
-        return blocks, text, None
+        return text, None
 
     if status == "completed":
         mentions_all = " ".join([format_user_mention(m["user_id"], m["username"]) for m in members])
@@ -1098,41 +1082,7 @@ def format_party_message(party: dict) -> tuple[list | None, str, InlineKeyboardM
             "\n".join([f"{i+1}. {format_user_mention(m['user_id'], m['username'])}" for i, m in enumerate(members)]) +
             f"\n\n<b>Призыв участников:</b> {mentions_all}"
         )
-        
-        list_items = []
-        for i, m in enumerate(members):
-            list_items.append({
-                "blocks": [{"type": "paragraph", "text": f"{m['username'].lstrip('@')}"}],
-                "has_checkbox": True,
-                "is_checked": True
-            })
-            
-        blocks = [
-            {"type": "heading", "text": f"✅ {party['title']} собрана!", "size": 2},
-            {"type": "paragraph", "text": f"Организатор: {party['creator_name']}"},
-            {"type": "list", "items": list_items},
-            {"type": "divider"},
-            {"type": "paragraph", "text": f"Призыв участников: {mentions_all}"}
-        ]
-        return blocks, text, None
-
-    list_items = []
-    for i in range(max_slots):
-        if i < joined_count:
-            m = members[i]
-            is_creator = (m["user_id"] == party["creator_id"])
-            role_suffix = " (Организатор)" if is_creator else ""
-            list_items.append({
-                "blocks": [{"type": "paragraph", "text": f"{m['username'].lstrip('@')}{role_suffix}"}],
-                "has_checkbox": True,
-                "is_checked": True
-            })
-        else:
-            list_items.append({
-                "blocks": [{"type": "paragraph", "text": "Свободный слот"}],
-                "has_checkbox": True,
-                "is_checked": False
-            })
+        return text, None
 
     slots_list = []
     for i in range(max_slots):
@@ -1152,12 +1102,6 @@ def format_party_message(party: dict) -> tuple[list | None, str, InlineKeyboardM
         f"<b>Состав:</b>\n{slots_str}"
     )
 
-    blocks = [
-        {"type": "heading", "text": f"👥 Сбор: {party['title']}", "size": 2},
-        {"type": "paragraph", "text": f"Организатор: {party['creator_name']}\nМест: {joined_count}/{max_slots}"},
-        {"type": "list", "items": list_items}
-    ]
-
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="Вступить", callback_data=f"pty:join:{party['id']}"),
@@ -1168,7 +1112,24 @@ def format_party_message(party: dict) -> tuple[list | None, str, InlineKeyboardM
             InlineKeyboardButton(text="Отменить сбор", callback_data=f"pty:cancel:{party['id']}")
         ]
     ])
-    return blocks, text, kb
+    return text, kb
+
+def _get_party_settings_kb(party_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="➕ 1 слот", callback_data=f"pty:inc_slots:{party_id}"),
+            InlineKeyboardButton(text="➖ 1 слот", callback_data=f"pty:dec_slots:{party_id}")
+        ],
+        [
+            InlineKeyboardButton(text="✏️ Изменить название", callback_data=f"pty:title_menu:{party_id}")
+        ],
+        [
+            InlineKeyboardButton(text="👤 Исключить участника", callback_data=f"pty:kick_menu:{party_id}")
+        ],
+        [
+            InlineKeyboardButton(text="◀️ Назад к сбору", callback_data=f"pty:refresh:{party_id}")
+        ]
+    ])
 
 @router.message(Command("party"))
 async def create_party_cmd(message: Message, command: CommandObject):
@@ -1197,7 +1158,7 @@ async def create_party_cmd(message: Message, command: CommandObject):
     )
 
     party_data = await db.get_party(party_id)
-    blocks, text, kb = format_party_message(party_data)
+    text, kb = format_party_message(party_data)
 
     msg = await send_smart_message(message.bot, message.chat.id, text, reply_markup=kb)
     await db.set_party_message_id(party_id, msg.message_id)
@@ -1238,7 +1199,7 @@ async def change_party_title_cmd(message: Message, command: CommandObject, bot: 
     new_title = command.args.strip()
     updated_party = await db.update_party_title(party_id, new_title)
     if updated_party:
-        blocks, text, kb = format_party_message(updated_party)
+        text, kb = format_party_message(updated_party)
         try:
             await bot.edit_message_text(text, chat_id=message.chat.id, message_id=reply_msg_id, parse_mode=ParseMode.HTML, reply_markup=kb)
             await reply_temp(message, f"✅ Название сбора успешно изменено на «{html.escape(new_title)}»!", delay=TIMEOUT_SUCCESS)
@@ -1277,7 +1238,7 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
         await db.unlock_achievement(callback.message.chat.id, user.id, "party_hero")
 
         if party_data and party_data.get("status") == "completed":
-            blocks, completion_text, _ = format_party_message(party_data)
+            completion_text, _ = format_party_message(party_data)
             try:
                 await send_smart_message(callback.message.bot, callback.message.chat.id, completion_text)
                 # Удаляем интерактивную карточку набора, так как пати полностью собрана
@@ -1319,22 +1280,7 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
             f"<b>⚙️ Настройки сбора: {html.escape(party_data['title'])}</b>\n"
             f"Число мест: <b>{party_data['max_slots']}</b> (Занято: {len(party_data['members'])})"
         )
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="➕ 1 слот", callback_data=f"pty:inc_slots:{party_id}"),
-                InlineKeyboardButton(text="➖ 1 слот", callback_data=f"pty:dec_slots:{party_id}")
-            ],
-            [
-                InlineKeyboardButton(text="✏️ Изменить название", callback_data=f"pty:title_menu:{party_id}")
-            ],
-            [
-                InlineKeyboardButton(text="👤 Исключить участника", callback_data=f"pty:kick_menu:{party_id}")
-            ],
-            [
-                InlineKeyboardButton(text="◀️ Назад к сбору", callback_data=f"pty:refresh:{party_id}")
-            ]
-        ])
-        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=_get_party_settings_kb(party_id))
         return
 
     elif action == "title_menu":
@@ -1360,22 +1306,7 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
             await callback.answer("Максимум 10 мест.", show_alert=True)
             return
         text = f"<b>⚙️ Настройки сбора: {html.escape(party_data['title'])}</b>\nЧисло мест: <b>{party_data['max_slots']}</b> (Занято: {len(party_data['members'])})"
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="➕ 1 слот", callback_data=f"pty:inc_slots:{party_id}"),
-                InlineKeyboardButton(text="➖ 1 слот", callback_data=f"pty:dec_slots:{party_id}")
-            ],
-            [
-                InlineKeyboardButton(text="✏️ Изменить название", callback_data=f"pty:title_menu:{party_id}")
-            ],
-            [
-                InlineKeyboardButton(text="👤 Исключить участника", callback_data=f"pty:kick_menu:{party_id}")
-            ],
-            [
-                InlineKeyboardButton(text="◀️ Назад к сбору", callback_data=f"pty:refresh:{party_id}")
-            ]
-        ])
-        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=_get_party_settings_kb(party_id))
         return
 
     elif action == "dec_slots":
@@ -1388,22 +1319,7 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
             await callback.answer("Нельзя сделать меньше задействованных мест или меньше 2.", show_alert=True)
             return
         text = f"<b>⚙️ Настройки сбора: {html.escape(party_data['title'])}</b>\nЧисло мест: <b>{party_data['max_slots']}</b> (Занято: {len(party_data['members'])})"
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="➕ 1 слот", callback_data=f"pty:inc_slots:{party_id}"),
-                InlineKeyboardButton(text="➖ 1 слот", callback_data=f"pty:dec_slots:{party_id}")
-            ],
-            [
-                InlineKeyboardButton(text="✏️ Изменить название", callback_data=f"pty:title_menu:{party_id}")
-            ],
-            [
-                InlineKeyboardButton(text="👤 Исключить участника", callback_data=f"pty:kick_menu:{party_id}")
-            ],
-            [
-                InlineKeyboardButton(text="◀️ Назад к сбору", callback_data=f"pty:refresh:{party_id}")
-            ]
-        ])
-        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=_get_party_settings_kb(party_id))
         return
 
     elif action == "kick_menu":
@@ -1433,7 +1349,7 @@ async def handle_party_callback(callback: CallbackQuery, bot: Bot):
         await callback.answer("Данные обновлены")
 
     if party_data:
-        blocks, text, kb = format_party_message(party_data)
+        text, kb = format_party_message(party_data)
         try:
             await edit_smart_message(callback.message.bot, callback.message.chat.id, callback.message.message_id, text, reply_markup=kb)
         except Exception:

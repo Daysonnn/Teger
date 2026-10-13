@@ -335,23 +335,25 @@ async def join_role(chat_id: int, role_name: str, user_id: int, username: str) -
             return "not_found"
         
         role_id = role[0]
-        try:
-            # Если передается реальный user_id (> 0) и юзернейм, удаляем старый синтетический дубликат этого юзернейма в этой роли
-            if username and user_id > 0:
-                clean_un = username if username.startswith("@") else f"@{username}"
-                await conn.execute(
-                    'DELETE FROM members WHERE role_id = ? AND LOWER(username) = LOWER(?) AND user_id != ?',
-                    (role_id, clean_un, user_id)
-                )
-
+        # Если передается реальный user_id (> 0) и юзернейм, удаляем старый синтетический дубликат этого юзернейма в этой роли
+        if username and user_id > 0:
+            clean_un = username if username.startswith("@") else f"@{username}"
             await conn.execute(
-                'INSERT INTO members (role_id, user_id, username) VALUES (?, ?, ?) '
-                'ON CONFLICT(role_id, user_id) DO UPDATE SET username=excluded.username', 
-                (role_id, user_id, username)
+                'DELETE FROM members WHERE role_id = ? AND LOWER(username) = LOWER(?) AND user_id != ?',
+                (role_id, clean_un, user_id)
             )
+
+        cursor = await conn.execute(
+            'INSERT OR IGNORE INTO members (role_id, user_id, username) VALUES (?, ?, ?)',
+            (role_id, user_id, username)
+        )
+        if cursor.rowcount == 0:
+            # Обновляем юзернейм на случай, если он изменился, но возвращаем already_in
+            await conn.execute('UPDATE members SET username = ? WHERE role_id = ? AND user_id = ?', (username, role_id, user_id))
             await conn.commit()
-        except aiosqlite.IntegrityError:
             return "already_in"
+
+        await conn.commit()
 
     await add_audit_log(chat_id, user_id, username, "Вступил в роль", f"Роль: {role_name}")
     return "success"
@@ -371,13 +373,6 @@ async def get_all_roles(chat_id: int) -> list[str]:
         cursor = await conn.execute('SELECT name FROM roles WHERE chat_id = ?', (chat_id,))
         rows = await cursor.fetchall()
         return [row[0] for row in rows]
-
-async def get_all_roles_with_details(chat_id: int) -> list[dict]:
-    """Возвращает роли с эмодзи."""
-    async with get_db() as conn:
-        cursor = await conn.execute("SELECT name, COALESCE(emoji, '🛡️') FROM roles WHERE chat_id = ?", (chat_id,))
-        rows = await cursor.fetchall()
-        return [{"name": r[0], "emoji": r[1]} for r in rows]
 
 async def get_role_emoji(chat_id: int, role_name: str) -> str:
     """Возвращает эмодзи роли."""

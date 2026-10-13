@@ -56,6 +56,38 @@ def check_admin_access(request: web.Request, fallback_user_id: any = None) -> bo
         return check_is_owner(fallback_user_id)
     return False
 
+def get_request_user(request: web.Request, fallback_user: dict | None = None) -> dict | None:
+    """
+    Возвращает данные пользователя из валидированного заголовка X-Telegram-Init-Data.
+    Если задан TOKEN бота, требует строгого совпадения криптографической подписи HMAC-SHA256.
+    Фоллбэк на fallback_user разрешен исключительно в тестовой среде (когда TOKEN бота не задан).
+    """
+    auth_user = get_authenticated_user(request)
+    if auth_user:
+        return auth_user
+    bot = request.app.get("bot")
+    token = bot.token if bot else os.getenv("TOKEN")
+    if not token and fallback_user:
+        return fallback_user
+    return None
+
+async def check_chat_admin_permission(request: web.Request, chat_id: int, user_id: int) -> bool:
+    """
+    Проверяет, является ли пользователь администратором/создателем группы или владельцем бота.
+    """
+    if check_is_owner(user_id):
+        return True
+    bot = request.app.get("bot")
+    token = bot.token if bot else os.getenv("TOKEN")
+    if not token or not bot or chat_id > 0:
+        return True
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+        return member.status in ("creator", "administrator")
+    except Exception as e:
+        logging.warning(f"Could not verify chat admin status for user {user_id} in {chat_id}: {e}")
+        return False
+
 async def handle_get_roles(request: web.Request):
     chat_id = request.query.get("chat_id")
     if not chat_id:
@@ -97,24 +129,23 @@ async def handle_join_role(request: web.Request):
     data = await request.json()
     chat_id = data.get("chat_id")
     role_name = data.get("role_name")
-    
-    auth_user = get_authenticated_user(request)
-    user_id = auth_user["id"] if auth_user else data.get("user_id")
-    username = (f"@{auth_user['username']}" if auth_user.get("username") else auth_user.get("first_name")) if auth_user else data.get("username")
 
-    if not chat_id or not role_name or (not user_id and not username):
+    fallback = {"id": data.get("user_id"), "username": data.get("username")} if data.get("user_id") else None
+    auth_user = get_request_user(request, fallback_user=fallback)
+    if not auth_user or not auth_user.get("id"):
+        return web.json_response({"error": "⛔ Требуется авторизация через Telegram Mini App."}, status=401)
+
+    user_id = int(auth_user["id"])
+    username = (f"@{auth_user['username']}" if auth_user.get("username") else auth_user.get("first_name")) or str(user_id)
+
+    if not chat_id or not role_name:
         return web.json_response({"error": "Missing fields"}, status=400)
 
-    if not user_id and username:
-        clean_un = username if username.startswith("@") else f"@{username}"
-        user_id = db.get_user_id_from_username(clean_un)
-        username = clean_un
-
-    result = await db.join_role(int(chat_id), role_name, int(user_id), username or str(user_id))
-    if result == "success" and user_id and int(user_id) > 0:
+    result = await db.join_role(int(chat_id), role_name, user_id, username)
+    if result == "success" and user_id > 0:
         bot = request.app.get("bot")
         import handlers
-        await handlers.process_join_achievements(bot, int(chat_id), int(user_id))
+        await handlers.process_join_achievements(bot, int(chat_id), user_id)
 
     return web.json_response({"status": result})
 
@@ -122,15 +153,20 @@ async def handle_leave_role(request: web.Request):
     data = await request.json()
     chat_id = data.get("chat_id")
     role_name = data.get("role_name")
-    auth_user = get_authenticated_user(request)
-    user_id = auth_user["id"] if auth_user else data.get("user_id")
 
-    if not all([chat_id, role_name, user_id]):
+    fallback = {"id": data.get("user_id")} if data.get("user_id") else None
+    auth_user = get_request_user(request, fallback_user=fallback)
+    if not auth_user or not auth_user.get("id"):
+        return web.json_response({"error": "⛔ Требуется авторизация через Telegram Mini App."}, status=401)
+
+    user_id = int(auth_user["id"])
+    if not chat_id or not role_name:
         return web.json_response({"error": "Missing fields"}, status=400)
 
-    success = await db.leave_role(int(chat_id), role_name, int(user_id))
+    success = await db.leave_role(int(chat_id), role_name, user_id)
     if success:
-        await db.add_audit_log(int(chat_id), int(user_id), None, "Покинул роль", f"Роль: {role_name}")
+        actor_name = f"@{auth_user['username']}" if auth_user.get("username") else (auth_user.get("first_name") or str(user_id))
+        await db.add_audit_log(int(chat_id), user_id, actor_name, "Покинул роль", f"Роль: {role_name}")
     return web.json_response({"status": "success" if success else "failed"})
 
 async def handle_create_role(request: web.Request):
@@ -142,9 +178,17 @@ async def handle_create_role(request: web.Request):
     if not chat_id or not role_name:
         return web.json_response({"error": "Missing fields"}, status=400)
 
+    auth_user = get_request_user(request)
+    if not auth_user:
+        return web.json_response({"error": "⛔ Требуется авторизация через Telegram Mini App."}, status=401)
+
+    if not await check_chat_admin_permission(request, int(chat_id), auth_user["id"]):
+        return web.json_response({"error": "⛔ Создавать роли могут только администраторы чата."}, status=403)
+
     success = await db.create_role(int(chat_id), role_name, emoji)
     if success:
-        await db.add_audit_log(int(chat_id), None, None, "Создана роль", f"{emoji} {role_name}")
+        actor_name = f"@{auth_user['username']}" if auth_user.get("username") else (auth_user.get("first_name") or str(auth_user["id"]))
+        await db.add_audit_log(int(chat_id), auth_user["id"], actor_name, "Создана роль", f"{emoji} {role_name}")
     return web.json_response({"status": "success" if success else "already_exists"})
 
 async def handle_delete_role(request: web.Request):
@@ -155,9 +199,17 @@ async def handle_delete_role(request: web.Request):
     if not chat_id or not role_name:
         return web.json_response({"error": "Missing fields"}, status=400)
 
+    auth_user = get_request_user(request)
+    if not auth_user:
+        return web.json_response({"error": "⛔ Требуется авторизация через Telegram Mini App."}, status=401)
+
+    if not await check_chat_admin_permission(request, int(chat_id), auth_user["id"]):
+        return web.json_response({"error": "⛔ Удалять роли могут только администраторы чата."}, status=403)
+
     success = await db.delete_role(int(chat_id), role_name)
     if success:
-        await db.add_audit_log(int(chat_id), None, None, "Удалена роль", f"Роль: {role_name}")
+        actor_name = f"@{auth_user['username']}" if auth_user.get("username") else (auth_user.get("first_name") or str(auth_user["id"]))
+        await db.add_audit_log(int(chat_id), auth_user["id"], actor_name, "Удалена роль", f"Роль: {role_name}")
     return web.json_response({"status": "success" if success else "not_found"})
 
 async def handle_aliases(request: web.Request):
@@ -176,6 +228,13 @@ async def handle_aliases(request: web.Request):
         alias_name = data.get("alias_name")
         if not chat_id or not role_name or not alias_name:
             return web.json_response({"error": "Missing fields"}, status=400)
+
+        auth_user = get_request_user(request)
+        if not auth_user:
+            return web.json_response({"error": "⛔ Требуется авторизация через Telegram Mini App."}, status=401)
+
+        if not await check_chat_admin_permission(request, int(chat_id), auth_user["id"]):
+            return web.json_response({"error": "⛔ Настраивать алиасы могут только администраторы чата."}, status=403)
         
         status = await db.add_role_alias(int(chat_id), role_name, alias_name)
         return web.json_response({"status": status})
@@ -186,6 +245,13 @@ async def handle_delete_alias(request: web.Request):
     alias_name = data.get("alias_name")
     if not chat_id or not alias_name:
         return web.json_response({"error": "Missing fields"}, status=400)
+
+    auth_user = get_request_user(request)
+    if not auth_user:
+        return web.json_response({"error": "⛔ Требуется авторизация через Telegram Mini App."}, status=401)
+
+    if not await check_chat_admin_permission(request, int(chat_id), auth_user["id"]):
+        return web.json_response({"error": "⛔ Удалять алиасы могут только администраторы чата."}, status=403)
     
     success = await db.remove_role_alias(int(chat_id), alias_name)
     return web.json_response({"status": "success" if success else "not_found"})
@@ -250,6 +316,13 @@ async def handle_sync_chat_members(request: web.Request):
     chat_id = request.query.get("chat_id")
     if not chat_id:
         return web.json_response({"error": "chat_id is required"}, status=400)
+
+    auth_user = get_request_user(request)
+    if not auth_user:
+        return web.json_response({"error": "⛔ Требуется авторизация через Telegram Mini App."}, status=401)
+
+    if not await check_chat_admin_permission(request, int(chat_id), auth_user["id"]):
+        return web.json_response({"error": "⛔ Синхронизировать участников могут только администраторы чата."}, status=403)
     
     bot = request.app.get("bot")
     if not bot:
@@ -279,6 +352,13 @@ async def handle_add_chat_member(request: web.Request):
     if not chat_id or not raw_usernames:
         return web.json_response({"error": "chat_id and username are required"}, status=400)
 
+    auth_user = get_request_user(request)
+    if not auth_user:
+        return web.json_response({"error": "⛔ Требуется авторизация через Telegram Mini App."}, status=401)
+
+    if not await check_chat_admin_permission(request, int(chat_id), auth_user["id"]):
+        return web.json_response({"error": "⛔ Добавлять участников могут только администраторы чата."}, status=403)
+
     try:
         chat_id_int = int(chat_id)
         items = [u.strip() for u in re.split(r'[,\s]+', raw_usernames) if u.strip()]
@@ -293,6 +373,10 @@ async def handle_add_chat_member(request: web.Request):
             if role_name:
                 await db.join_role(chat_id_int, role_name, synth_id, clean_un)
             added.append(clean_un)
+
+        actor_name = f"@{auth_user['username']}" if auth_user.get("username") else (auth_user.get("first_name") or str(auth_user["id"]))
+        details = f"Добавлено: {', '.join(added)}" + (f" в роль {role_name}" if role_name else "")
+        await db.add_audit_log(chat_id_int, auth_user["id"], actor_name, "Добавлены участники", details)
 
         return web.json_response({"status": "success", "count": len(added), "members": added})
     except Exception as e:
