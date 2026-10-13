@@ -47,14 +47,6 @@ async def test_case_insensitive_roles():
     assert deleted is True
 
 
-def test_respect_rank_badges():
-    assert db.get_respect_rank_title(60) == ("🗿", "Гигачад")
-    assert db.get_respect_rank_title(35) == ("👑", "Легенда")
-    assert db.get_respect_rank_title(20) == ("💎", "Авторитет")
-    assert db.get_respect_rank_title(10) == ("⭐", "Уважаемый")
-    assert db.get_respect_rank_title(2) == ("🌱", "Новичок")
-    assert db.get_respect_rank_title(0) == ("🚶", "Прохожий")
-
 
 @pytest.mark.asyncio
 async def test_format_party_message_structure():

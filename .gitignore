@@ -12,3 +12,5 @@ env/
 cloudflared.exe
 *.session
 *.session-journal
+.agents/
+.pytest_cache/

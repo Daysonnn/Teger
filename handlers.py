@@ -872,23 +872,8 @@ async def inline_query_handler(query: InlineQuery):
                 )
             )
 
-        # 4. Топ респекта /top
-        if not query_text or "top".startswith(query_text) or "топ".startswith(query_text) or "респект".startswith(query_text):
-            add_result(
-                InlineQueryResultArticle(
-                    id="inline_cmd_top",
-                    title="🏆 /top — Топ респекта группы",
-                    description="Рейтинг лидеров респекта этой группы",
-                    thumbnail_url=default_thumb,
-                    input_message_content=InputTextMessageContent(
-                        message_text="/top",
-                        parse_mode=ParseMode.HTML
-                    )
-                )
-            )
-
-        # 5. Если введен конкретный текст (название роли, например @bot dev или @bot admin)
-        if query_text and query_text not in ("all", "party", "list", "top", "все", "пати", "сбор", "роли", "список", "топ", "респект"):
+        # 4. Если введен конкретный текст (название роли, например @bot dev или @bot admin)
+        if query_text and query_text not in ("all", "party", "list", "все", "пати", "сбор", "роли", "список"):
             clean_role = query_text.lstrip("/")
             add_result(
                 InlineQueryResultArticle(
@@ -1695,130 +1680,8 @@ def _collect_known_commands() -> None:
                     name = cmd.command if hasattr(cmd, 'command') else str(cmd)
                     KNOWN_COMMANDS.add(name.lower())
 
-    fallback = {"start", "help", "menu", "sync", "create", "delete", "join", "leave", "list", "add", "all", "everyone", "notify", "send", "party", "party_title", "alias", "unalias", "top", "rep", "respect"}
+    fallback = {"start", "help", "menu", "sync", "create", "delete", "join", "leave", "list", "add", "all", "everyone", "notify", "send", "party", "party_title", "alias", "unalias"}
     KNOWN_COMMANDS.update(fallback)
-
-
-RESPECT_KEYWORDS = {
-    # Спс / Спасибо вариации
-    "спс", "спасибо", "пасиб", "пасиба", "пасибо", "спсиб", "спасибочко", "спасибочки",
-    "пасибки", "пасибку", "спсибо", "спсб", "спасиб", "благодарю", "благодарочка", "благодарчик",
-    # Респект / Репа вариации
-    "респект", "respect", "реп", "+реп", "+rep", "плюсреп", "плюс реп", "репа", "+репа", "+репутация",
-    "отдуши", "от души", "душевный", "бп",
-    # Похвала / Одобрение
-    "красава", "красавчик", "лучший", "лучшая", "лудший", "лучш",
-    # Английский / Сленг
-    "thx", "thanks", "ty", "сенкс", "сэнкс",
-    # Плюсы
-    "+1", "+", "+100", "+100500", "+1000"
-}
-
-async def build_respect_top_rich_blocks(chat_id: int) -> tuple[list, str]:
-    """Генерирует структуры Rich Message блоков и HTML тексты для топа респекта."""
-    top_users = await db.get_top_respect(chat_id, limit=10)
-    if not top_users:
-        text = (
-            "🏆 <b>Топ респекта группы</b>\n\n"
-            "<i>Пока никто не получил респект. Отвечайте «спасибо» или «+» на сообщения участников!</i>"
-        )
-        blocks = [
-            {"type": "heading", "text": "🏆 Топ Респекта Группы", "size": 2},
-            {"type": "paragraph", "text": "Пока никто не получил респект.\nОтвечайте «спасибо» или «+» на сообщения!"}
-        ]
-        return blocks, text
-
-    list_items = []
-    text_lines = ["🏆 <b>Топ лидеров респекта группы:</b>\n"]
-    for u in top_users:
-        rank_num = u["rank"]
-        title_str = f" ({u['title']})" if u['title'] else ""
-        uname_clean = u['username'].lstrip('@')
-        list_items.append({
-            "blocks": [{"type": "paragraph", "text": f"{rank_num}. {uname_clean} — {u['points']} 🤝{title_str}"}]
-        })
-        text_lines.append(f"{rank_num}. <b>{html.escape(u['username'])}</b> — <b>{u['points']}</b> 🤝{html.escape(title_str)}")
-
-    text_lines.append("\n💡 <i>Отвечайте «спс», «спасибо», «+реп» или «+» на сообщения, чтобы давать респект!</i>")
-
-    blocks = [
-        {"type": "heading", "text": "🏆 Топ Лидеров Респекта", "size": 2},
-        {"type": "list", "items": list_items}
-    ]
-    return blocks, "\n".join(text_lines)
-
-async def process_respect_give(message: Message, target_user: User):
-    from_user = message.from_user
-    chat_id = message.chat.id
-    
-    target_un = f"@{target_user.username}" if target_user.username else target_user.first_name
-
-    status, value, (badge, title) = await db.give_respect(chat_id, from_user.id, target_user.id, target_un)
-
-    if status == "self":
-        await reply_temp(message, "😄 Сам себе респект не выпишешь!", delay=TIMEOUT_WARNING)
-    elif status == "cooldown":
-        mins = max(1, (value + 59) // 60)
-        await reply_temp(message, f"⏳ Вы уже давали респект {html.escape(target_un)} недавно. Подождите ещё ~{mins} мин.", delay=TIMEOUT_WARNING)
-    elif status == "success":
-        from_un = f"@{from_user.username}" if from_user.username else from_user.first_name
-        badge_str = f"{badge} " if badge else ""
-        text = (
-            f"🤝 <b>{html.escape(from_un)}</b> выразил(а) респект <b>{html.escape(target_un)}</b>! (+)\n"
-            f"📊 Всего очков: <b>{value}</b> | Ранг: {badge_str}<b>{title}</b>"
-        )
-        await message.reply(text, parse_mode=ParseMode.HTML)
-        await db.unlock_achievement(chat_id, target_user.id, "first_respect")
-
-        # Автообновление сообщения /top в реальном времени при получении респекта
-        top_msg_id = await db.get_active_top_message(chat_id)
-        if top_msg_id:
-            try:
-                blocks, html_text = await build_respect_top_rich_blocks(chat_id)
-                await edit_smart_message(message.bot, chat_id, top_msg_id, html_text, rich_blocks=blocks)
-            except Exception as e:
-                logging.warning(f"Failed to auto-update top message: {e}")
-
-
-@router.message(Command("top", "rep", "respect"))
-async def respect_top_cmd(message: Message, command: CommandObject):
-    if message.chat.type == ChatType.PRIVATE:
-        await reply_temp(message, "📋 Топ респекта доступен в группах!", delay=TIMEOUT_WARNING)
-        return
-
-    # Если команду вызвали в ответ на чье-то сообщение: /rep -> дать респект
-    if command.command in ("rep", "respect") and message.reply_to_message and message.reply_to_message.from_user:
-        await process_respect_give(message, message.reply_to_message.from_user)
-        return
-
-    chat_id = message.chat.id
-    blocks, html_text = await build_respect_top_rich_blocks(chat_id)
-    
-    sent_msg = await send_smart_message(message.bot, chat_id, html_text, rich_blocks=blocks)
-    if sent_msg and hasattr(sent_msg, 'message_id'):
-        await db.save_active_top_message(chat_id, sent_msg.message_id)
-
-
-@router.message(F.text & F.reply_to_message)
-async def respect_text_trigger(message: Message):
-    if message.chat.type == ChatType.PRIVATE or not message.from_user or not message.reply_to_message.from_user:
-        return
-
-    target_user = message.reply_to_message.from_user
-    if target_user.is_bot:
-        return
-
-    clean_text = message.text.strip().lower()
-    
-    # Игнорируем минус-респект и любые сообщения, пытающиеся отнять респект
-    if clean_text.startswith("-") or "минус" in clean_text or "-rep" in clean_text or "-реп" in clean_text:
-        return
-
-    words = {w.strip("!.,?:;()+-") for w in clean_text.replace("\n", " ").split()}
-    raw_words = set(clean_text.replace("\n", " ").split())
-    
-    if (words & RESPECT_KEYWORDS) or (raw_words & RESPECT_KEYWORDS) or "от души" in clean_text or "плюс реп" in clean_text or clean_text.startswith("+"):
-        await process_respect_give(message, target_user)
 
 
 @router.message(F.text.startswith("/"))

@@ -90,7 +90,6 @@ function switchTab(name, btn) {
   if (name === 'stats') fetchChatMembers();
   else if (name === 'logs') fetchAuditLogs();
   else if (name === 'achievements') fetchAchievements();
-  else if (name === 'respect') fetchRespectTop();
   else if (name === 'admin') fetchAdminStats();
 }
 
@@ -721,68 +720,7 @@ document.querySelectorAll('.emoji-row').forEach(el => {
   }, { passive: false });
 });
 
-// ---- Respect Top ----
-async function fetchRespectTop() {
-  const el = document.getElementById('respect-list');
-  el.innerHTML = '<div class="loader-state">Загрузка...</div>';
-  try {
-    const url = chatId ? `/api/respect_top?chat_id=${chatId}` : `/api/respect_top`;
-    const res = await fetch(url);
-    const data = await res.json();
-    const list = data.top || [];
-    if (!list.length) {
-      el.innerHTML = '<div class="empty-state">Пока никто не получил респект</div>';
-      return;
-    }
-    el.innerHTML = '';
-    const frag = document.createDocumentFragment();
-    list.forEach(u => {
-      const row = document.createElement('div');
-      row.className = 'list-item-row';
-      const rankIcon = `${u.rank}.`;
-      const badgeStr = u.badge ? `${u.badge} ` : '';
-      row.innerHTML = `
-        <div class="item-main">
-          <div class="item-title">${rankIcon} ${esc(u.username)}</div>
-          <div class="item-sub">${badgeStr}${esc(u.title)}</div>
-        </div>
-        <div class="badge-chip purple">${u.points} 🤝</div>
-      `;
-      frag.appendChild(row);
-    });
-    el.appendChild(frag);
-  } catch (e) {
-    el.innerHTML = '<div class="empty-state">Ошибка загрузки</div>';
-  }
-}
 
-async function saveAdminRespect() {
-  const targetChat = document.getElementById('admin-respect-chat-id').value.trim() || chatId;
-  const targetUser = document.getElementById('admin-respect-user-id').value.trim();
-  const ptsVal = document.getElementById('admin-respect-pts').value.trim();
-  
-  if (!targetChat) { toast('Укажите Target Chat ID'); return; }
-  if (!targetUser) { toast('Укажите User ID пользователя'); return; }
-  if (ptsVal === '') { toast('Укажите количество очков'); return; }
-
-  try {
-    const data = await apiPost('/api/admin/respect/set', {
-      user_id: currentUser.id,
-      chat_id: targetChat,
-      target_user_id: targetUser,
-      points: parseInt(ptsVal)
-    });
-    if (data.status === 'success') {
-      haptic('medium');
-      toast(`✅ Респект установлен: ${data.new_points} 🤝`);
-      fetchRespectTop();
-    } else {
-      toast(data.error || 'Ошибка');
-    }
-  } catch (e) {
-    toast('Ошибка соединения');
-  }
-}
 
 // ---- Boot ----
 checkOwnerStatus();
