@@ -323,17 +323,22 @@ async def test_checkin_chat_user_and_count():
     assert await db.get_chat_users_count(chat_id) == 2
 
 
-def test_build_checkin_message():
+def test_build_checkin_message(monkeypatch):
     from handlers import build_checkin_message
+    monkeypatch.setenv("WEBAPP_URL", "https://mywebapp.com")
+
     # Для приветственного сообщения
-    text_w, kb_w = build_checkin_message(-1001, 5, is_welcome=True)
+    text_w, kb_w = build_checkin_message(-1001, 5, is_welcome=True, bot_username="tegerrbot")
     assert "успешно активирован" in text_w
     assert "Зарегистрировано:" in text_w and "5 чел." in text_w
     assert kb_w.inline_keyboard[0][0].callback_data == "cb:checkin:-1001"
     assert "Я в чате" in kb_w.inline_keyboard[0][0].text
+    # В группах должна использоваться ссылка t.me, а не web_app=WebAppInfo (запрещено Telegram API в группах)
+    assert kb_w.inline_keyboard[1][0].url == "https://t.me/tegerrbot?startapp=-1001"
+    assert kb_w.inline_keyboard[1][0].web_app is None
 
     # Для команды /checkin
-    text_c, kb_c = build_checkin_message(-1001, 12, is_welcome=False)
+    text_c, kb_c = build_checkin_message(-1001, 12, is_welcome=False, bot_username="tegerrbot")
     assert "Перекличка чата!" in text_c
     assert "Зарегистрировано:" in text_c and "12 чел." in text_c
     assert kb_c.inline_keyboard[0][0].callback_data == "cb:checkin:-1001"
@@ -376,7 +381,7 @@ async def test_checkin_russian_aliases_registered():
     for alias in ["checkin", "check_in", "init", "чекин", "чекине", "чек", "перекличка"]:
         assert alias in KNOWN_COMMANDS
 
-    # Проверяем, что фильтр команды находит русские и английские варианты вне зависимости от регистра
+    # Проверяем, что фильтр команды находит русские и английские варианты вне зависимости от регистра и упоминаний
     handler = router.message.handlers[0]
     cmd_filter = None
     for f in handler.filters:
@@ -389,7 +394,7 @@ async def test_checkin_russian_aliases_registered():
     mock_bot = MagicMock()
     mock_bot.me = AsyncMock(return_value=BotUser(id=1, is_bot=True, first_name="B", username="tegerrbot"))
 
-    for txt in ["/checkin", "/Checkin", "/чекин", "/Чекин", "/чекине", "/чек", "/перекличка"]:
+    for txt in ["/checkin", "/Checkin", "/checkin@tegerrbot", "/Checkin@tegerrbot", "/чекин", "/Чекин", "/чекине", "/чек", "/перекличка"]:
         m = Message(
             message_id=1,
             date=datetime.now(),

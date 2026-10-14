@@ -40,7 +40,7 @@ async def sync_chat_administrators(bot: Bot, chat_id: int) -> int:
         logging.error(f"Error syncing chat administrators for {chat_id}: {e}")
         return 0
 
-def build_checkin_message(chat_id: int, count: int, is_welcome: bool = False) -> tuple[str, InlineKeyboardMarkup]:
+def build_checkin_message(chat_id: int, count: int, is_welcome: bool = False, bot_username: str | None = None) -> tuple[str, InlineKeyboardMarkup]:
     """Формирует интерактивное сообщение переклички чата со счетчиком и кнопкой."""
     if is_welcome:
         header = (
@@ -63,11 +63,16 @@ def build_checkin_message(chat_id: int, count: int, is_welcome: bool = False) ->
     )
 
     webapp_url = os.getenv("WEBAPP_URL", "").strip()
+    username = bot_username or get_bot_username()
     kb_buttons = [
         [InlineKeyboardButton(text="✅ Я в чате (Записаться)", callback_data=f"cb:checkin:{chat_id}")]
     ]
-    if webapp_url.startswith("https://"):
-        kb_buttons.append([InlineKeyboardButton(text="📱 Выбрать роли (Mini App)", web_app=WebAppInfo(url=f"{webapp_url}?chat_id={chat_id}"))])
+    if webapp_url:
+        # В группах Telegram WebApp открывается через ссылку t.me/<bot>?startapp=<chat_id>
+        # Кнопка web_app=WebAppInfo(...) в группах запрещена Telegram Bot API (BUTTON_TYPE_INVALID)
+        app_link = f"https://t.me/{username}?startapp={chat_id}"
+        kb_buttons.append([InlineKeyboardButton(text="📱 Выбрать роли (Mini App)", url=app_link)])
+
     kb_buttons.append([
         InlineKeyboardButton(text="📋 Список ролей", callback_data=f"cb:list:{chat_id}"),
         InlineKeyboardButton(text="ℹ️ Справка", callback_data=f"cb:help:{chat_id}")
@@ -96,7 +101,7 @@ async def on_bot_added(event: ChatMemberUpdated, bot: Bot):
         except Exception as e:
             logging.error(f"Failed to send welcome message in {chat_id}: {e}")
 
-@router.message(Command("checkin", "check_in", "init", "чекин", "чекине", "чек", "перекличка", ignore_case=True))
+@router.message(Command("checkin", "check_in", "init", "чекин", "чекине", "чек", "перекличка", ignore_case=True, ignore_mention=True))
 async def checkin_cmd(message: Message, bot: Bot = None):
     """Интерактивная перекличка чата для быстрого сбора базы участников."""
     bot = bot or message.bot
