@@ -62,11 +62,11 @@ def build_checkin_message(chat_id: int, count: int, is_welcome: bool = False) ->
         "💡 <i>Администратор: закрепите это сообщение с галочкой «Уведомить всех участников», чтобы зарегистрировать весь чат!</i>"
     )
 
-    webapp_url = os.getenv("WEBAPP_URL")
+    webapp_url = os.getenv("WEBAPP_URL", "").strip()
     kb_buttons = [
         [InlineKeyboardButton(text="✅ Я в чате (Записаться)", callback_data=f"cb:checkin:{chat_id}")]
     ]
-    if webapp_url:
+    if webapp_url.startswith("https://"):
         kb_buttons.append([InlineKeyboardButton(text="📱 Выбрать роли (Mini App)", web_app=WebAppInfo(url=f"{webapp_url}?chat_id={chat_id}"))])
     kb_buttons.append([
         InlineKeyboardButton(text="📋 Список ролей", callback_data=f"cb:list:{chat_id}"),
@@ -96,24 +96,41 @@ async def on_bot_added(event: ChatMemberUpdated, bot: Bot):
         except Exception as e:
             logging.error(f"Failed to send welcome message in {chat_id}: {e}")
 
-@router.message(Command("checkin", "init"))
-async def checkin_cmd(message: Message, bot: Bot):
+@router.message(Command("checkin", "check_in", "init", "чекин", "чекине", "чек", "перекличка", ignore_case=True))
+async def checkin_cmd(message: Message, bot: Bot = None):
     """Интерактивная перекличка чата для быстрого сбора базы участников."""
+    bot = bot or message.bot
+
     if message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
-        await message.answer("ℹ️ Команда переклички доступна только в групповых чатах.")
+        help_pm = (
+            "📢 <b>Перекличка чата (Check-in)</b>\n\n"
+            "Команда <code>/checkin</code> предназначена для <b>групповых чатов</b>:\n\n"
+            "1. Добавьте бота в вашу группу.\n"
+            "2. Выдайте боту права администратора (чтобы он мог видеть реакции и собирать базу).\n"
+            "3. Отправьте в группе команду <code>/checkin</code> (или <code>/чекин</code>).\n"
+            "4. Закрепите отправленное сообщение с галочкой «Уведомить всех участников»!\n\n"
+            "👥 Все участники группы, нажавшие кнопку <b>«✅ Я в чате»</b>, мгновенно попадают в базу бота для призывов <code>/all</code> и ролей."
+        )
+        await message.answer(help_pm, parse_mode=ParseMode.HTML)
         return
 
     chat_id = message.chat.id
-    # Подтягиваем админов чата и автора команды
-    await sync_chat_administrators(bot, chat_id)
+    # Запускаем синхронизацию админов в фоне, чтобы не задерживать отправку сообщения
+    if bot:
+        asyncio.create_task(sync_chat_administrators(bot, chat_id))
+
     if message.from_user and not message.from_user.is_bot:
         u = message.from_user
         uname = f"@{u.username}" if u.username else u.first_name
         await db.record_chat_user(chat_id, u.id, uname)
 
     count = await db.get_chat_users_count(chat_id)
+    count = max(count, 1)
     text, kb = build_checkin_message(chat_id, count, is_welcome=False)
-    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    try:
+        await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    except Exception as e:
+        logging.error(f"Failed to send checkin message in {chat_id}: {e}")
 
 @router.callback_query(F.data.startswith("cb:checkin:"))
 async def cb_checkin(query: CallbackQuery):
@@ -145,9 +162,9 @@ async def cb_checkin(query: CallbackQuery):
             msg_text = query.message.text or query.message.caption or ""
             is_welcome = "успешно активирован" in msg_text
             new_text, kb = build_checkin_message(chat_id, total_count, is_welcome=is_welcome)
-            await query.message.edit_text(new_text, parse_mode=ParseMode.HTML, reply_markup=kb)
-        except Exception:
-            pass
+            await edit_smart_message(query.bot, chat_id, query.message.message_id, new_text, reply_markup=kb)
+        except Exception as e:
+            logging.debug(f"Could not edit checkin message: {e}")
 
 @router.chat_member(ChatMemberUpdatedFilter(member_status_changed=JOIN_TRANSITION))
 async def on_user_joined(event: ChatMemberUpdated):
@@ -1456,7 +1473,11 @@ def _collect_known_commands() -> None:
                     name = cmd.command if hasattr(cmd, 'command') else str(cmd)
                     KNOWN_COMMANDS.add(name.lower())
 
-    fallback = {"start", "help", "menu", "sync", "create", "delete", "join", "leave", "list", "add", "all", "everyone", "notify", "send", "party", "party_title", "alias", "unalias"}
+    fallback = {
+        "start", "help", "menu", "sync", "create", "delete", "join", "leave",
+        "list", "add", "all", "everyone", "notify", "send", "party", "party_title",
+        "alias", "unalias", "checkin", "check_in", "init", "чекин", "чекине", "чек", "перекличка"
+    }
     KNOWN_COMMANDS.update(fallback)
 
 

@@ -1,6 +1,7 @@
 import sys
 import os
 import asyncio
+from datetime import datetime
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
@@ -344,12 +345,12 @@ async def test_checkin_command_group_and_private():
     mock_bot = AsyncMock()
     mock_bot.get_chat_administrators = AsyncMock(return_value=[])
 
-    # 1. Личный чат -> отказ
+    # 1. Личный чат -> справка о групповом использовании
     msg_priv = AsyncMock(spec=Message)
     msg_priv.chat = MagicMock(type=ChatType.PRIVATE, id=123)
     msg_priv.answer = AsyncMock()
     await checkin_cmd(msg_priv, mock_bot)
-    assert "только в групповых чатах" in msg_priv.answer.call_args[0][0]
+    assert "групповых чатов" in msg_priv.answer.call_args[0][0]
 
     # 2. Групповой чат -> отправка сообщения со счетчиком и кнопкой
     msg_group = AsyncMock(spec=Message)
@@ -366,6 +367,41 @@ async def test_checkin_command_group_and_private():
 
 
 @pytest.mark.asyncio
+async def test_checkin_russian_aliases_registered():
+    from aiogram.filters import Command
+    from aiogram.types import User as BotUser
+    from handlers import router, KNOWN_COMMANDS, _collect_known_commands
+
+    _collect_known_commands()
+    for alias in ["checkin", "check_in", "init", "чекин", "чекине", "чек", "перекличка"]:
+        assert alias in KNOWN_COMMANDS
+
+    # Проверяем, что фильтр команды находит русские и английские варианты вне зависимости от регистра
+    handler = router.message.handlers[0]
+    cmd_filter = None
+    for f in handler.filters:
+        cb = f.callback if hasattr(f, 'callback') else f
+        if isinstance(cb, Command):
+            cmd_filter = cb
+            break
+
+    assert cmd_filter is not None
+    mock_bot = MagicMock()
+    mock_bot.me = AsyncMock(return_value=BotUser(id=1, is_bot=True, first_name="B", username="tegerrbot"))
+
+    for txt in ["/checkin", "/Checkin", "/чекин", "/Чекин", "/чекине", "/чек", "/перекличка"]:
+        m = Message(
+            message_id=1,
+            date=datetime.now(),
+            chat=Chat(id=-1001, type="supergroup"),
+            from_user=User(id=2, is_bot=False, first_name="A"),
+            text=txt
+        )
+        res = await cmd_filter(m, mock_bot)
+        assert bool(res) is True, f"Failed matching command: {txt}"
+
+
+@pytest.mark.asyncio
 async def test_cb_checkin_flow():
     from handlers import cb_checkin
     chat_id = -100444333
@@ -377,27 +413,29 @@ async def test_cb_checkin_flow():
         await conn.execute("DELETE FROM chat_users WHERE chat_id = ?", (chat_id,))
         await conn.commit()
 
+    mock_bot = AsyncMock()
     mock_query = AsyncMock(spec=CallbackQuery)
+    mock_query.bot = mock_bot
     mock_query.data = f"cb:checkin:{chat_id}"
     mock_query.from_user = MagicMock(id=user_id, username=username, is_bot=False)
-    mock_msg = AsyncMock(spec=Message)
+    mock_msg = MagicMock(spec=Message)
     mock_msg.chat = MagicMock(id=chat_id, type=ChatType.SUPERGROUP)
+    mock_msg.message_id = 999
     mock_msg.text = "📢 Перекличка чата!\nЗарегистрировано: 0 чел."
     mock_msg.caption = None
-    mock_msg.edit_text = AsyncMock()
     mock_query.message = mock_msg
     mock_query.answer = AsyncMock()
 
     # Первый клик
     await cb_checkin(mock_query)
     mock_query.answer.assert_called_with(text="✅ Отлично! Вы внесены в базу участников чата.")
-    mock_msg.edit_text.assert_called_once()
-    edited_text = mock_msg.edit_text.call_args[0][0]
+    mock_bot.edit_message_text.assert_called_once()
+    edited_text = mock_bot.edit_message_text.call_args[1]["text"]
     assert "Зарегистрировано:" in edited_text and "1 чел." in edited_text
 
     # Второй клик того же пользователя
     mock_query.answer.reset_mock()
-    mock_msg.edit_text.reset_mock()
+    mock_bot.edit_message_text.reset_mock()
     await cb_checkin(mock_query)
     mock_query.answer.assert_called_with(text="ℹ️ Вы уже есть в базе этого чата!")
 
