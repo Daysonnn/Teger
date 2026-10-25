@@ -42,19 +42,35 @@ def check_is_owner(user_id: int | str | None) -> bool:
         return False
 
 def check_admin_access(request: web.Request, fallback_user_id: any = None) -> bool:
-    """
-    Проверяет права владельца бота.
-    Сначала проверяет криптографическую подпись initData Telegram Mini App (HMAC-SHA256).
-    Если initData не передан, fallback_user_id принимается только при отсутствии конфигурации токена (например, в моках/тестах).
-    """
+    """Проверяет владельца только по криптографически проверенному initData.
+    fallback_user_id никогда не используется для подтверждения прав админа."""
     auth_user = get_authenticated_user(request)
-    if auth_user:
-        return check_is_owner(auth_user.get("id"))
+    return bool(auth_user and check_is_owner(auth_user.get("id")))
+
+
+async def check_chat_access(request: web.Request, chat_id: int, user_id: int) -> bool:
+    """Fail closed unless Telegram confirms the user belongs to this group."""
     bot = request.app.get("bot")
-    token = bot.token if bot else os.getenv("TOKEN")
-    if not token and fallback_user_id:
-        return check_is_owner(fallback_user_id)
-    return False
+    if not bot or chat_id >= 0:
+        return False
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+        return member.status not in ("left", "kicked")
+    except Exception as e:
+        logging.warning(f"Could not verify chat access for user {user_id} in {chat_id}: {e}")
+        return False
+
+
+def require_authenticated_user(request: web.Request) -> dict | None:
+    user = get_authenticated_user(request)
+    if not user or user.get("is_bot"):
+        return None
+    return user
+
+
+async def require_chat_access(request: web.Request, chat_id: int, user: dict) -> bool:
+    return await check_chat_access(request, chat_id, int(user["id"]))
+
 
 def get_request_user(request: web.Request, fallback_user: dict | None = None) -> dict | None:
     """
@@ -65,21 +81,15 @@ def get_request_user(request: web.Request, fallback_user: dict | None = None) ->
     auth_user = get_authenticated_user(request)
     if auth_user:
         return auth_user
-    bot = request.app.get("bot")
-    token = bot.token if bot else os.getenv("TOKEN")
-    if not token and fallback_user:
-        return fallback_user
     return None
 
 async def check_chat_admin_permission(request: web.Request, chat_id: int, user_id: int) -> bool:
-    """
-    Проверяет, является ли пользователь администратором/создателем группы или владельцем бота.
-    """
-    if check_is_owner(user_id):
-        return True
+    """Проверяет админство по Telegram; при невозможности проверки отказывает."""
     bot = request.app.get("bot")
     token = bot.token if bot else os.getenv("TOKEN")
-    if not token or not bot or chat_id > 0:
+    if not token or not bot or chat_id >= 0:
+        return False
+    if check_is_owner(user_id):
         return True
     try:
         member = await bot.get_chat_member(chat_id, user_id)
@@ -96,18 +106,11 @@ async def handle_get_roles(request: web.Request):
     try:
         chat_id = int(chat_id)
 
-        # Автоматическая фиксация участника в БД чата при открытии Mini App
-        auth_user = get_authenticated_user(request)
-        user_id = auth_user["id"] if auth_user else request.query.get("user_id")
-        username = (f"@{auth_user['username']}" if auth_user.get("username") else auth_user.get("first_name")) if auth_user else request.query.get("username")
-        if user_id:
-            try:
-                uid_int = int(user_id)
-                if uid_int > 0:
-                    clean_un = username if (username and username.startswith("@")) else (f"@{username}" if username else f"User {uid_int}")
-                    await db.record_chat_user(chat_id, uid_int, clean_un)
-            except (ValueError, TypeError):
-                pass
+        auth_user = require_authenticated_user(request)
+        if not auth_user:
+            return web.json_response({"error": "Authentication required"}, status=401)
+        if not await require_chat_access(request, chat_id, auth_user):
+            return web.json_response({"error": "Forbidden"}, status=403)
 
         # Получаем все роли со списками участников за 1 SQL запрос с JOIN
         roles_with_members = await db.get_roles_with_members(chat_id)
@@ -130,22 +133,29 @@ async def handle_join_role(request: web.Request):
     chat_id = data.get("chat_id")
     role_name = data.get("role_name")
 
-    fallback = {"id": data.get("user_id"), "username": data.get("username")} if data.get("user_id") else None
-    auth_user = get_request_user(request, fallback_user=fallback)
+    auth_user = get_request_user(request)
     if not auth_user or not auth_user.get("id"):
         return web.json_response({"error": "⛔ Требуется авторизация через Telegram Mini App."}, status=401)
-
-    user_id = int(auth_user["id"])
-    username = (f"@{auth_user['username']}" if auth_user.get("username") else auth_user.get("first_name")) or str(user_id)
 
     if not chat_id or not role_name:
         return web.json_response({"error": "Missing fields"}, status=400)
 
-    result = await db.join_role(int(chat_id), role_name, user_id, username)
+    try:
+        chat_id_int = int(chat_id)
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid chat_id"}, status=400)
+
+    user_id = int(auth_user["id"])
+    if not await check_chat_access(request, chat_id_int, user_id):
+        return web.json_response({"error": "Forbidden: No access to this chat"}, status=403)
+
+    username = (f"@{auth_user['username']}" if auth_user.get("username") else auth_user.get("first_name")) or str(user_id)
+
+    result = await db.join_role(chat_id_int, role_name, user_id, username)
     if result == "success" and user_id > 0:
         bot = request.app.get("bot")
         import handlers
-        await handlers.process_join_achievements(bot, int(chat_id), user_id)
+        await handlers.process_join_achievements(bot, chat_id_int, user_id)
 
     return web.json_response({"status": result})
 
@@ -154,19 +164,26 @@ async def handle_leave_role(request: web.Request):
     chat_id = data.get("chat_id")
     role_name = data.get("role_name")
 
-    fallback = {"id": data.get("user_id")} if data.get("user_id") else None
-    auth_user = get_request_user(request, fallback_user=fallback)
+    auth_user = get_request_user(request)
     if not auth_user or not auth_user.get("id"):
         return web.json_response({"error": "⛔ Требуется авторизация через Telegram Mini App."}, status=401)
 
-    user_id = int(auth_user["id"])
     if not chat_id or not role_name:
         return web.json_response({"error": "Missing fields"}, status=400)
 
-    success = await db.leave_role(int(chat_id), role_name, user_id)
+    try:
+        chat_id_int = int(chat_id)
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Invalid chat_id"}, status=400)
+
+    user_id = int(auth_user["id"])
+    if not await check_chat_access(request, chat_id_int, user_id):
+        return web.json_response({"error": "Forbidden: No access to this chat"}, status=403)
+
+    success = await db.leave_role(chat_id_int, role_name, user_id)
     if success:
         actor_name = f"@{auth_user['username']}" if auth_user.get("username") else (auth_user.get("first_name") or str(user_id))
-        await db.add_audit_log(int(chat_id), user_id, actor_name, "Покинул роль", f"Роль: {role_name}")
+        await db.add_audit_log(chat_id_int, user_id, actor_name, "Покинул роль", f"Роль: {role_name}")
     return web.json_response({"status": "success" if success else "failed"})
 
 async def handle_create_role(request: web.Request):
@@ -218,6 +235,11 @@ async def handle_aliases(request: web.Request):
         role_name = request.query.get("role_name")
         if not chat_id or not role_name:
             return web.json_response({"error": "Missing fields"}, status=400)
+        auth_user = require_authenticated_user(request)
+        if not auth_user:
+            return web.json_response({"error": "Authentication required"}, status=401)
+        if not await require_chat_access(request, int(chat_id), auth_user):
+            return web.json_response({"error": "Forbidden"}, status=403)
         aliases = await db.get_role_aliases(int(chat_id), role_name)
         return web.json_response({"aliases": aliases})
     
@@ -263,6 +285,11 @@ async def handle_get_chat_members(request: web.Request):
 
     try:
         chat_id_int = int(chat_id)
+        auth_user = require_authenticated_user(request)
+        if not auth_user:
+            return web.json_response({"error": "Authentication required"}, status=401)
+        if not await require_chat_access(request, chat_id_int, auth_user):
+            return web.json_response({"error": "Forbidden"}, status=403)
         members = await db.get_all_chat_users(chat_id_int)
 
         # Если участников в базе ещё 0, пробуем автоматически подтянуть администраторов группы
@@ -387,15 +414,20 @@ async def handle_get_audit_logs(request: web.Request):
     chat_id = request.query.get("chat_id")
     if not chat_id:
         return web.json_response({"error": "chat_id is required"}, status=400)
+    auth_user = require_authenticated_user(request)
+    if not auth_user:
+        return web.json_response({"error": "Authentication required"}, status=401)
     try:
-        logs = await db.get_audit_logs(int(chat_id))
+        chat_id_int = int(chat_id)
+        if not await require_chat_access(request, chat_id_int, auth_user):
+            return web.json_response({"error": "Forbidden"}, status=403)
+        logs = await db.get_audit_logs(chat_id_int)
         return web.json_response({"logs": logs})
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_admin_check(request: web.Request):
-    user_id = request.query.get("user_id")
-    is_owner = check_admin_access(request, user_id)
+    is_owner = check_admin_access(request)
     return web.json_response({
         "is_owner": is_owner
     })
@@ -403,12 +435,11 @@ async def handle_admin_check(request: web.Request):
 async def handle_admin_send(request: web.Request):
     try:
         data = await request.json()
-        user_id = data.get("user_id")
         target_chat_id = data.get("chat_id")
         message_text = data.get("message")
         is_global = data.get("is_global", False)
 
-        if not check_admin_access(request, user_id):
+        if not check_admin_access(request):
             return web.json_response({"error": "⛔ Доступ запрещен. Только для владельца бота."}, status=403)
 
         if not message_text:
@@ -459,8 +490,7 @@ async def handle_admin_send(request: web.Request):
         return web.json_response({"error": f"Ошибка отправки: {str(e)}"}, status=500)
 
 async def handle_admin_stats(request: web.Request):
-    user_id = request.query.get("user_id")
-    if not check_admin_access(request, user_id):
+    if not check_admin_access(request):
         return web.json_response({"error": "Доступ запрещен"}, status=403)
     
     try:
@@ -489,15 +519,22 @@ async def handle_admin_stats(request: web.Request):
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_get_achievements(request: web.Request):
-    user_id = request.query.get("user_id")
     chat_id = request.query.get("chat_id")
-    if not user_id:
-        return web.json_response({"error": "user_id is required"}, status=400)
+    auth_user = require_authenticated_user(request)
+    if not auth_user:
+        return web.json_response({"error": "Authentication required"}, status=401)
+    requested_user_id = request.query.get("user_id")
+    user_id = int(auth_user["id"])
+    if requested_user_id and str(user_id) != requested_user_id and not check_is_owner(user_id):
+        return web.json_response({"error": "Forbidden"}, status=403)
     try:
         if chat_id:
-            achs = await db.get_user_achievements(int(chat_id), int(user_id))
+            chat_id_int = int(chat_id)
+            if not await require_chat_access(request, chat_id_int, auth_user):
+                return web.json_response({"error": "Forbidden"}, status=403)
+            achs = await db.get_user_achievements(chat_id_int, user_id)
         else:
-            achs = await db.get_user_achievements_global(int(user_id))
+            achs = await db.get_user_achievements_global(user_id)
         return web.json_response({"achievements": achs})
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)

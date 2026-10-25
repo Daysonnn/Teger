@@ -1,5 +1,6 @@
 import os
 import html
+import time
 import asyncio
 import logging
 from typing import Any
@@ -21,6 +22,17 @@ from cleaner import (
 
 # Кэш результатов check_admin: ключ (chat_id, user_id) → True/False, 60 сек
 _admin_cache: TTLCache = TTLCache(maxsize=512, ttl=60)
+
+# Ограничители частоты и лимиты массовых упоминаний
+SEND_COOLDOWN_SECONDS = 30
+ALL_COOLDOWN_SECONDS = 60
+ROLE_CALL_COOLDOWN_SECONDS = 30
+MAX_MENTIONS_LIMIT = 50
+LARGE_ROLE_THRESHOLD = 10
+
+_send_cooldowns: dict[int, float] = {}
+_all_cooldowns: dict[int, float] = {}
+_role_call_cooldowns: dict[tuple[int, str], float] = {}
 
 router = Router()
 
@@ -967,9 +979,10 @@ async def list_roles(message: Message):
 async def send_custom_msg(message: Message, command: CommandObject, bot: Bot):
     owner_id_env = os.getenv("OWNER_ID")
     is_owner = False
-    if owner_id_env:
+    user_id = message.from_user.id if message.from_user else 0
+    if owner_id_env and user_id:
         try:
-            is_owner = (message.from_user.id == int(owner_id_env.strip()))
+            is_owner = (user_id == int(owner_id_env.strip()))
         except ValueError:
             pass
 
@@ -987,11 +1000,39 @@ async def send_custom_msg(message: Message, command: CommandObject, bot: Bot):
         return
 
     parts = command.args.split(maxsplit=1)
-    target_chat_id = parts[0]
+    target_chat_id = parts[0].strip()
     msg_text = parts[1]
+
+    # Безопасные цели: не-владельцам разрешено отправлять только в текущий чат или явно заданные цели
+    if not is_owner:
+        allowed_targets_env = os.getenv("ALLOWED_SEND_TARGETS", "")
+        allowed_targets = {t.strip() for t in allowed_targets_env.split(",") if t.strip()}
+        allowed_targets.add(str(message.chat.id))
+
+        if target_chat_id not in allowed_targets:
+            await reply_temp(
+                message,
+                "⛔ Отправка в сторонние чаты запрещена. Доступна только владельцу бота.",
+                delay=TIMEOUT_WARNING
+            )
+            return
+
+    # Ограничение частоты отправки (cooldown)
+    now = time.monotonic()
+    last_send = _send_cooldowns.get(user_id, 0.0)
+    cooldown = 5 if is_owner else SEND_COOLDOWN_SECONDS
+    if now - last_send < cooldown:
+        rem = int(cooldown - (now - last_send)) + 1
+        await reply_temp(
+            message,
+            f"⏳ Ограничение частоты: подождите {rem} сек. перед повторной отправкой.",
+            delay=TIMEOUT_WARNING
+        )
+        return
 
     try:
         await bot.send_message(chat_id=target_chat_id, text=msg_text, parse_mode=ParseMode.HTML)
+        _send_cooldowns[user_id] = now
         await reply_temp(message, f"✅ Сообщение успешно отправлено в <code>{target_chat_id}</code>!", delay=TIMEOUT_SUCCESS)
     except Exception as e:
         await reply_temp(message, f"❌ Ошибка отправки: <code>{html.escape(str(e))}</code>", delay=TIMEOUT_WARNING)
@@ -1132,6 +1173,18 @@ async def call_all_members(message: Message, bot: Bot):
     if not await is_group(message): return
     chat_id = message.chat.id
     
+    # Ограничение частоты для массовых упоминаний (/all, /everyone)
+    now = time.monotonic()
+    last_all = _all_cooldowns.get(chat_id, 0.0)
+    if now - last_all < ALL_COOLDOWN_SECONDS:
+        rem = int(ALL_COOLDOWN_SECONDS - (now - last_all)) + 1
+        await reply_temp(
+            message,
+            f"⏳ Массовый призыв уже использовался недавно. Подождите {rem} сек.",
+            delay=TIMEOUT_WARNING
+        )
+        return
+
     if message.from_user:
         user = message.from_user
         uname = f"@{user.username}" if user.username else user.first_name
@@ -1147,18 +1200,36 @@ async def call_all_members(message: Message, bot: Bot):
         await reply_temp(message, "👥 В группе пока нет зарегистрированных участников.\nИспользуйте /sync для подтягивания админов.", delay=TIMEOUT_WARNING)
         return
 
+    # В больших группах массовый призыв разрешён только администраторам
+    if len(members) >= LARGE_ROLE_THRESHOLD and not await check_admin(bot, message):
+        await reply_temp(
+            message,
+            f"👑 Массовый призыв в больших группах ({len(members)} чел.) доступен только администраторам.",
+            delay=TIMEOUT_WARNING
+        )
+        return
+
+    _all_cooldowns[chat_id] = now
+
+    # Лимит получателей для защиты от спама и блокировок Telegram
+    total_count = len(members)
+    if len(members) > MAX_MENTIONS_LIMIT:
+        members = members[:MAX_MENTIONS_LIMIT]
+
+    count_label = f"первые {MAX_MENTIONS_LIMIT} из {total_count}" if total_count > MAX_MENTIONS_LIMIT else f"{len(members)}"
+
     if len(members) <= 12:
         mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
         mentions_str = ", ".join(f"👤 {m}" for m in mentions_list)
 
         text = (
-            f"📢 <b>Призыв ВСЕХ участников чата!</b> ({len(members)} чел.)\n"
+            f"📢 <b>Призыв ВСЕХ участников чата!</b> ({count_label} чел.)\n"
             f"<blockquote>{mentions_str}</blockquote>"
         )
         await message.reply(text, parse_mode=ParseMode.HTML)
     else:
         # Разбиваем на батчи по 8 человек: гарантирует доставку push-уведомлений и защиту от лимита в 4096 символов
-        await message.reply(f"📢 <b>Призыв ВСЕХ участников чата!</b> ({len(members)} чел.):", parse_mode=ParseMode.HTML)
+        await message.reply(f"📢 <b>Призыв ВСЕХ участников чата!</b> ({count_label} чел.):", parse_mode=ParseMode.HTML)
         batch_size = 8
         for i in range(0, len(members), batch_size):
             chunk = members[i:i + batch_size]
@@ -1514,11 +1585,40 @@ async def dynamic_role_call(message: Message):
     members = await db.get_role_members(chat_id, role_name)
 
     if members:
+        # Для больших групп (10+ участников в роли) вызов доступен только администраторам
+        if len(members) >= LARGE_ROLE_THRESHOLD:
+            if not await check_admin(message.bot, message):
+                await reply_temp(
+                    message,
+                    f"👑 Призыв роли {emoji} <b>{html.escape(role_name)}</b> с большим числом участников ({len(members)} чел.) доступен только администраторам.",
+                    delay=TIMEOUT_WARNING
+                )
+                return
+
+        # Ограничение частоты вызова ролей (cooldown)
+        now = time.monotonic()
+        last_role_call = _role_call_cooldowns.get((chat_id, role_name), 0.0)
+        if now - last_role_call < ROLE_CALL_COOLDOWN_SECONDS:
+            rem = int(ROLE_CALL_COOLDOWN_SECONDS - (now - last_role_call)) + 1
+            await reply_temp(
+                message,
+                f"⏳ Роль {emoji} <b>{html.escape(role_name)}</b> уже вызывалась недавно. Подождите {rem} сек.",
+                delay=TIMEOUT_WARNING
+            )
+            return
+
+        total_count = len(members)
+        if len(members) > MAX_MENTIONS_LIMIT:
+            members = members[:MAX_MENTIONS_LIMIT]
+
+        _role_call_cooldowns[(chat_id, role_name)] = now
+
         mentions_list = [format_user_mention(uid, uname) for uid, uname in members]
         mentions_str = ", ".join(f"👤 {m}" for m in mentions_list)
 
+        count_label = f"первые {MAX_MENTIONS_LIMIT} из {total_count}" if total_count > MAX_MENTIONS_LIMIT else f"{len(members)}"
         text = (
-            f"📢 <b>Призыв участников {emoji} {html.escape(role_name)}!</b> ({len(members)} чел.)\n"
+            f"📢 <b>Призыв участников {emoji} {html.escape(role_name)}!</b> ({count_label} чел.)\n"
             f"<blockquote>{mentions_str}</blockquote>"
         )
         await message.reply(text, parse_mode=ParseMode.HTML)

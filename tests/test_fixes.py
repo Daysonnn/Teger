@@ -488,4 +488,135 @@ async def test_user_recorder_middleware_reactions_and_callbacks():
     assert len(users_after_bot) == 2
 
 
+@pytest.mark.asyncio
+async def test_check_chat_admin_permission_fail_closed(monkeypatch):
+    from aiohttp import web
+    from aiohttp.test_utils import make_mocked_request
+    from api import check_chat_admin_permission
+
+    app = web.Application()
+    req = make_mocked_request("GET", "/api/chat_members", app=app)
+    # 1. Без бота/токена
+    assert await check_chat_admin_permission(req, -100123, 111) is False
+
+    # 2. Положительный chat_id (личка/пользователь)
+    monkeypatch.setenv("TOKEN", "test:token")
+    mock_bot = AsyncMock()
+    mock_bot.token = "test:token"
+    app["bot"] = mock_bot
+    assert await check_chat_admin_permission(req, 12345, 111) is False
+
+    # 3. Ошибка get_chat_member
+    mock_bot.get_chat_member = AsyncMock(side_effect=Exception("API Error"))
+    assert await check_chat_admin_permission(req, -100123, 111) is False
+
+    # 4. Пользователь не админ (member)
+    member_mock = MagicMock(status="member")
+    mock_bot.get_chat_member = AsyncMock(return_value=member_mock)
+    assert await check_chat_admin_permission(req, -100123, 111) is False
+
+    # 5. Пользователь админ
+    admin_mock = MagicMock(status="administrator")
+    mock_bot.get_chat_member = AsyncMock(return_value=admin_mock)
+    assert await check_chat_admin_permission(req, -100123, 111) is True
+
+
+@pytest.mark.asyncio
+async def test_send_command_restricted_to_owner_or_safe_targets(monkeypatch):
+    from handlers import send_custom_msg, _send_cooldowns
+    from aiogram.filters import CommandObject
+    from aiogram.enums import ParseMode
+
+    _send_cooldowns.clear()
+    monkeypatch.setenv("OWNER_ID", "999")
+    mock_bot = AsyncMock()
+
+    # Не-админ и не-владелец
+    msg = MagicMock(spec=Message)
+    msg.message_id = 777
+    msg.from_user = MagicMock(id=111)
+    msg.chat = MagicMock(id=-1001, type=ChatType.SUPERGROUP)
+    msg.reply = AsyncMock()
+    cmd = CommandObject(prefix="/", command="send", args="-1002 Test message")
+
+    async def mock_check_admin_false(b, m):
+        return False
+    monkeypatch.setattr("handlers.check_admin", mock_check_admin_false)
+
+    await send_custom_msg(msg, cmd, mock_bot)
+    mock_bot.send_message.assert_not_called()
+
+    # Админ чата -1001 пытается отправить в сторонний чат -1002 (без ALLOWED_SEND_TARGETS)
+    async def mock_check_admin_true(b, m):
+        return True
+    monkeypatch.setattr("handlers.check_admin", mock_check_admin_true)
+
+    await send_custom_msg(msg, cmd, mock_bot)
+    mock_bot.send_message.assert_not_called()
+
+    # Админ чата -1001 отправляет в свой же чат -1001 -> разрешено
+    cmd_self = CommandObject(prefix="/", command="send", args="-1001 Self message")
+    await send_custom_msg(msg, cmd_self, mock_bot)
+    mock_bot.send_message.assert_called_once_with(chat_id="-1001", text="Self message", parse_mode=ParseMode.HTML)
+
+    # Повторная отправка сразу же блокируется cooldown
+    mock_bot.send_message.reset_mock()
+    await send_custom_msg(msg, cmd_self, mock_bot)
+    mock_bot.send_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mass_mentions_cooldown_and_limits(monkeypatch):
+    from handlers import call_all_members, _all_cooldowns, dynamic_role_call, _role_call_cooldowns
+
+    _all_cooldowns.clear()
+    _role_call_cooldowns.clear()
+
+    chat_id = -100999111
+    mock_bot = AsyncMock()
+
+    # Создадим 15 пользователей в БД
+    await db.init_db()
+    users = [(chat_id, 1000 + i, f"@user{i}") for i in range(15)]
+    await db.record_chat_users_batch(users)
+
+    msg = MagicMock(spec=Message)
+    msg.message_id = 888
+    msg.chat = MagicMock(id=chat_id, type=ChatType.SUPERGROUP)
+    msg.from_user = MagicMock(id=1000, username="user0")
+    msg.reply = AsyncMock()
+    msg.answer = AsyncMock()
+    msg.bot = mock_bot
+
+    # Не-админ в группе с >= 10 пользователями пытается вызвать /all
+    async def mock_not_admin(b, m):
+        return False
+    monkeypatch.setattr("handlers.check_admin", mock_not_admin)
+
+    await call_all_members(msg, mock_bot)
+    # Должно быть предупреждение о запрете для не-админов
+    reply_text1 = msg.reply.call_args.kwargs.get("text", "") or (msg.reply.call_args[0][0] if msg.reply.call_args[0] else "")
+    assert "доступен только администраторам" in reply_text1
+
+    # Админ в группе может вызвать /all
+    async def mock_is_admin(b, m):
+        return True
+    monkeypatch.setattr("handlers.check_admin", mock_is_admin)
+
+    msg.reply.reset_mock()
+    await call_all_members(msg, mock_bot)
+    assert msg.reply.called
+    call_args = msg.reply.call_args
+    reply_text2 = call_args.kwargs.get("text", "") or (call_args[0][0] if call_args[0] else "")
+    assert "Призыв ВСЕХ участников чата" in reply_text2
+
+    # Сразу повторный вызов /all должен быть заблокирован cooldown
+    msg.reply.reset_mock()
+    await call_all_members(msg, mock_bot)
+    call_args_cd = msg.reply.call_args
+    reply_text3 = call_args_cd.kwargs.get("text", "") or (call_args_cd[0][0] if call_args_cd[0] else "")
+    assert "уже использовался недавно" in reply_text3
+
+
+
 

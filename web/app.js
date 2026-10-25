@@ -214,7 +214,10 @@ function renderRoles(roles) {
   container.innerHTML = '';
 
   if (!roles.length) {
-    container.innerHTML = `<div class="loader-state">Ролей пока нет</div>`;
+    const emptyState = document.createElement('div');
+    emptyState.className = 'loader-state';
+    emptyState.textContent = 'Ролей пока нет';
+    container.appendChild(emptyState);
     return;
   }
 
@@ -227,33 +230,93 @@ function renderRoles(roles) {
     card.className = 'role-card';
     card.style.animationDelay = `${i * 35}ms`;
 
-    const membersHtml = role.members.length
-      ? role.members.map(m => {
-          const me = m.user_id === currentUser.id;
-          return `<span class="mbadge${me ? ' me' : ''}">${me ? '⭐ ' : ''}${esc(m.username)}</span>`;
-        }).join('')
-      : `<span class="no-members">пока никого нет</span>`;
+    // 1. Верхняя панель карточки
+    const topDiv = document.createElement('div');
+    topDiv.className = 'role-card-top';
 
-    const joinBtn = isMember
-      ? `<button class="btn-secondary grow" onclick="leaveRole('${esc(role.name)}')">Выйти</button>`
-      : `<button class="btn-primary grow" onclick="joinRole('${esc(role.name)}')">Вступить</button>`;
+    const identityDiv = document.createElement('div');
+    identityDiv.className = 'role-identity';
 
-    card.innerHTML = `
-      <div class="role-card-top">
-        <div class="role-identity">
-          <div class="role-emoji">${icon}</div>
-          <div class="role-name">${esc(role.name)}</div>
-        </div>
-        <span class="role-count">${role.members.length}</span>
-      </div>
-      <div class="members-wrap">${membersHtml}</div>
-      <div class="role-actions">
-        ${joinBtn}
-        <button class="btn-icon" onclick="openMemberModal('${esc(role.name)}')" title="Участники" aria-label="Управление участниками роли ${esc(role.name)}">👤+</button>
-        <button class="btn-icon" onclick="shareRoleLink('${esc(role.name)}')" title="Скопировать ссылку" aria-label="Скопировать ссылку на роль ${esc(role.name)}">🔗</button>
-        <button class="btn-danger" onclick="deleteRole('${esc(role.name)}')" title="Удалить" aria-label="Удалить роль ${esc(role.name)}">🗑</button>
-      </div>
-    `;
+    const emojiDiv = document.createElement('div');
+    emojiDiv.className = 'role-emoji';
+    emojiDiv.textContent = icon;
+
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'role-name';
+    nameDiv.textContent = role.name;
+
+    identityDiv.appendChild(emojiDiv);
+    identityDiv.appendChild(nameDiv);
+
+    const countSpan = document.createElement('span');
+    countSpan.className = 'role-count';
+    countSpan.textContent = String(role.members.length);
+
+    topDiv.appendChild(identityDiv);
+    topDiv.appendChild(countSpan);
+    card.appendChild(topDiv);
+
+    // 2. Список участников роли
+    const membersWrap = document.createElement('div');
+    membersWrap.className = 'members-wrap';
+
+    if (role.members && role.members.length > 0) {
+      role.members.forEach(m => {
+        const isMe = m.user_id === currentUser.id;
+        const badge = document.createElement('span');
+        badge.className = isMe ? 'mbadge me' : 'mbadge';
+        badge.textContent = (isMe ? '⭐ ' : '') + (m.username || '');
+        membersWrap.appendChild(badge);
+      });
+    } else {
+      const noMembers = document.createElement('span');
+      noMembers.className = 'no-members';
+      noMembers.textContent = 'пока никого нет';
+      membersWrap.appendChild(noMembers);
+    }
+    card.appendChild(membersWrap);
+
+    // 3. Панель действий роли
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'role-actions';
+
+    const joinBtn = document.createElement('button');
+    joinBtn.className = isMember ? 'btn-secondary grow' : 'btn-primary grow';
+    joinBtn.textContent = isMember ? 'Выйти' : 'Вступить';
+    joinBtn.addEventListener('click', () => {
+      if (isMember) {
+        leaveRole(role.name);
+      } else {
+        joinRole(role.name);
+      }
+    });
+    actionsDiv.appendChild(joinBtn);
+
+    const memberBtn = document.createElement('button');
+    memberBtn.className = 'btn-icon';
+    memberBtn.textContent = '👤+';
+    memberBtn.title = 'Участники';
+    memberBtn.setAttribute('aria-label', `Управление участниками роли ${role.name}`);
+    memberBtn.addEventListener('click', () => openMemberModal(role.name));
+    actionsDiv.appendChild(memberBtn);
+
+    const shareBtn = document.createElement('button');
+    shareBtn.className = 'btn-icon';
+    shareBtn.textContent = '🔗';
+    shareBtn.title = 'Скопировать ссылку';
+    shareBtn.setAttribute('aria-label', `Скопировать ссылку на роль ${role.name}`);
+    shareBtn.addEventListener('click', () => shareRoleLink(role.name));
+    actionsDiv.appendChild(shareBtn);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'btn-danger';
+    deleteBtn.textContent = '🗑';
+    deleteBtn.title = 'Удалить';
+    deleteBtn.setAttribute('aria-label', `Удалить роль ${role.name}`);
+    deleteBtn.addEventListener('click', () => deleteRole(role.name));
+    actionsDiv.appendChild(deleteBtn);
+
+    card.appendChild(actionsDiv);
     frag.appendChild(card);
   });
   container.appendChild(frag);
